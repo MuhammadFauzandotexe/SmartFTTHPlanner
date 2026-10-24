@@ -5,6 +5,8 @@ import { MapContainer, TileLayer, useMap } from "react-leaflet"
 import L from "leaflet"
 import { toGeoJSON, type Category, type FeatureItem } from "@/lib/survey"
 import { baseMaps, categories, layerPaneName, layerZIndex, type LayerSettings, type LayerStyle } from "@/lib/layer-settings"
+import { PlanningMapLayers } from "@/components/planning-map-layers"
+import type { FtthPlan } from "@/lib/ftth-planning"
 import "leaflet/dist/leaflet.css"
 
 type MapViewProps = {
@@ -13,6 +15,12 @@ type MapViewProps = {
   onReady?: (map: L.Map) => void
   showLabels?: boolean
   settings: LayerSettings
+  plan?: FtthPlan | null
+  highlightedGroupId?: string | null
+  onSelectHome?: (id: string) => void
+  onHighlightGroup?: (id: string) => void
+  onHoverGroup?: (id: string | null) => void
+  onSelectGroup?: (id: string) => void
 }
 
 function pointIcon(style: LayerStyle, category: "Rumah" | "Tiang") {
@@ -42,6 +50,12 @@ const names = new WeakMap<L.Layer, string>()
 function MapInitializer({ onReady }: { onReady?: (map: L.Map) => void }) {
   const map = useMap()
   useEffect(() => { onReady?.(map) }, [map, onReady])
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }))
+    observer.observe(map.getContainer())
+    return () => observer.disconnect()
+  }, [map])
   return null
 }
 
@@ -114,12 +128,13 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
   return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels, settings }: MapViewProps) {
+export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, highlightedGroupId, onSelectGroup, onSelectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
   const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
   const base = baseMaps[settings.baseMap]
   return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
     <TileLayer key={settings.baseMap} attribution={base.attribution} url={base.url} maxNativeZoom={19} maxZoom={22} />
     <MapInitializer onReady={onReady} />
     {categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
+    {plan && plan.groups.length > 0 && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
   </MapContainer>
 }

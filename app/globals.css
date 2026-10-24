@@ -197,3 +197,64 @@
     @apply bg-background text-foreground;
   }
 }
+
+
+.planning-group-identity {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border: 1px solid white;
+  border-radius: 4px;
+  color: white;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 30%);
+}
+
+.planning-label-marker, .planning-fat-marker { background: transparent; border: 0; }
+.planning-fat-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid white;
+  border-radius: 5px;
+  background: #b45309;
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: 0 1px 5px rgb(15 23 42 / 45%);
+}
+.planning-fat-choice {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: white;
+  color: #0f172a;
+  cursor: pointer;
+  text-align: left;
+}
+.planning-fat-choice:hover, .planning-fat-choice:focus-visible { background: #ecfdf5; }
+.ftth-planning-control .leaflet-control-layers-list { max-width: 240px; font-size: 11px; }
+
+
+.planning-group-open, .planning-group-name {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.planning-group-open { border-right: 1px solid rgb(255 255 255 / 50%); }
+.planning-group-open:hover, .planning-group-name:hover { background: rgb(255 255 255 / 20%); }
+.planning-group-open:focus-visible, .planning-group-name:focus-visible { outline: 2px solid white; outline-offset: -2px; }
