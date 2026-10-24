@@ -6,7 +6,7 @@ Dokumen ini memisahkan kondisi kode saat ini dari kebutuhan pengembangan. Dasar 
 
 Smart FTTH Planner adalah aplikasi pemetaan dan perencanaan jaringan Fiber to the Home (FTTH). Data awal berasal dari survei lapangan berupa koordinat tiang dan rumah pelanggan dalam KML/KMZ.
 
-Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, data demo, impor KML terbatas, dan ekspor GeoJSON terbatas. Otomatisasi jaringan, penempatan perangkat, link budget, dan BoQ merupakan rencana pengembangan.
+Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, kondisi awal kosong, impor KML terbatas, dan ekspor GeoJSON terbatas. Otomatisasi jaringan, penempatan perangkat, link budget, dan BoQ merupakan rencana pengembangan.
 
 Prinsip pengembangan:
 
@@ -27,12 +27,12 @@ Calon pengguna adalah petugas survei, perencana jaringan, dan pemeriksa hasil pe
 
 Alur yang sudah didukung secara terbatas:
 
-1. Buka halaman utama; aplikasi menampilkan data demo, bukan otomatis membaca file survei di root.
+1. Buka halaman utama; aplikasi menampilkan peta tanpa objek survei dan petunjuk impor, bukan otomatis membaca file survei di root.
 2. Pilih **Impor Data** untuk memilih satu atau beberapa file. KML titik sederhana dapat ditambahkan; KMZ belum dibaca.
 3. Cari berdasarkan nama atau ID, lihat titik pada peta, dan klik titik untuk memeriksa kategori, koordinat, serta sumber file.
 4. Pilih rumah untuk melihat tiang terdekat berdasarkan jarak garis lurus.
 5. Gunakan zoom dan **Fit ke Data**, lalu ekspor fitur yang lolos pencarian menjadi GeoJSON dengan keterbatasan geometri yang dijelaskan di bawah.
-6. Muat ulang halaman akan menghapus hasil impor dari memori dan mengembalikan data demo.
+6. Muat ulang halaman akan menghapus hasil impor dari memori dan mengembalikan viewer ke kondisi kosong.
 
 Alur tujuan berikutnya: validasi survei → koreksi jaringan antartiang → penempatan FAT → penempatan FDT dan koneksi sumber → link budget → BoQ → pemeriksaan serta ekspor. Ini belum menjadi alur aplikasi yang dapat dijalankan.
 
@@ -74,7 +74,7 @@ app/
   layout.tsx               Metadata, viewport, CSS, Analytics produksi
   globals.css              Tailwind, tema, penyesuaian Leaflet
 components/
-  ftth-viewer.tsx           State, data demo, impor, pencarian, ekspor, panel
+  ftth-viewer.tsx           State, impor, pencarian, ekspor, panel
   map-view.tsx              Peta Leaflet, tile, marker, callback pemilihan
   ui/                      Button, Badge, Input, Separator
 lib/
@@ -119,13 +119,13 @@ type FeatureItem = {
 
 `description` dan `props` belum diisi parser. Satu pasangan koordinat tidak cukup untuk menyimpan garis/poligon. Kategori diperkirakan dari nama: FDT, FAT, POLE/TIANG, atau RUMAH/HOME/PELANGGAN; kategori lain menjadi “Belum dikategorikan”. Belum tersedia editor kategori.
 
-Data demo dibuat di kode: 38 tiang, 16 rumah, satu FAT, satu FDT, dan satu entri jalur kabel (57 fitur). Nama sumber `survey_bandung.kmz` pada data demo bukan hasil pembacaan file tersebut. Entri kabel hanya memiliki satu pasangan koordinat dan tidak digambar sebagai garis.
+Data dummy telah dihapus. State awal berisi nol fitur dan nol file; marker serta jumlah kategori hanya berasal dari hasil impor. Jumlah file dihitung dari nama sumber unik pada fitur yang berhasil dimuat, bukan jumlah semua file yang dipilih. File kosong atau gagal dibaca tidak masuk hitungan; dua file berbeda bernama sama dihitung sebagai satu sumber.
 
 ### Aturan data yang diperlukan
 
 - GeoJSON menggunakan urutan **longitude, latitude**. Contoh Point: `[107.603, -6.9147]`.
 - Internal viewer memakai **latitude, longitude**, sesuai pemakaian Leaflet. Antarmuka saat ini hanya memberi label “Koordinat”; label eksplisit “Latitude, Longitude” masih perlu ditambahkan pada pengembangan berikutnya.
-- LineString membutuhkan daftar pasangan koordinat; Polygon membutuhkan cincin koordinat yang valid. Ekspor saat ini menukar urutan koordinat untuk Point dengan benar, tetapi tetap memberi satu pasangan untuk jenis garis/poligon sehingga belum aman untuk semua fitur, termasuk entri kabel demo.
+- LineString membutuhkan daftar pasangan koordinat; Polygon membutuhkan cincin koordinat yang valid. Ekspor saat ini menukar urutan koordinat untuk Point dengan benar, tetapi tetap memberi satu pasangan untuk jenis garis/poligon sehingga belum aman untuk semua fitur.
 - Rencana pembacaan KMZ: ekstrak arsip dengan JSZip, pilih KML, konversi dengan togeojson, validasi, lalu normalisasi. Aturan memilih KML bila arsip berisi beberapa KML: **Perlu ditentukan**.
 - Perhitungan jarak dan luas harus menggunakan fungsi geospasial dengan satuan eksplisit; jangan menghitung jarak langsung dari selisih derajat. Jarak saat ini menggunakan Turf dalam meter; luas belum dihitung.
 - Screenshot peta bukan pengganti koordinat asli maupun data geometri survei.
@@ -144,19 +144,19 @@ Data demo dibuat di kode: 38 tiang, 16 rumah, satu FAT, satu FDT, dan satu entri
 | Impor KML | Sebagian | Pembacaan titik sederhana; geometri lengkap dan validasi belum tersedia |
 | Impor KMZ | Sebagian | Pemilih menerima ekstensi; ekstraksi dan pembacaan isi belum tersedia |
 | Ekspor GeoJSON | Sebagian | Mengunduh fitur hasil pencarian; geometri garis/poligon belum valid |
-| Ringkasan survei | Sebagian | Total fitur dan jumlah kategori dinamis; “1 file”, “1,24 km”, serta “Terpetakan” statis |
+| Ringkasan survei | Sebagian | Jumlah sumber file, fitur, kategori, dan status mengikuti data impor; panjang garis ditandai “Belum dihitung” saat ada data, “—” saat kosong |
 | Filter layer/kategori | Sebagian | Tombol kategori tidak mengubah fitur; belum menyembunyikan layer |
 | Label | Sebagian | Tooltip dipasang saat hover jika opsi aktif; belum berbasis zoom dan belum ada pelepasan tooltip yang jelas saat opsi dimatikan |
 | Ukur jarak | Sebagian | State dan rumus ada; klik peta belum mengisi titik ukur dan hasil belum ditampilkan |
 | Buffer | Sebagian | Input awal “100” dan pemanggilan toast saja; tidak membuat atau menggambar geometri buffer |
-| Koordinat kursor dan skala | Sebagian | Koordinat “—” dan skala “1 : 5.000” masih statis |
+| Koordinat kursor dan skala | Sebagian | Koordinat kursor masih “—”; skala dummy dihapus, perhitungan skala belum tersedia |
 | Notifikasi | Sebagian | Pemanggilan Sonner ada; host Toaster belum ditemukan |
 | Clustering marker / label berdasarkan zoom | Direncanakan | Dependency clustering belum digunakan |
 | Validasi, deduplikasi, koreksi manual survei | Direncanakan | Belum ada editor atau laporan validasi |
 | Penyimpanan proyek | Direncanakan | Hanya state selama sesi; muat ulang kehilangan impor |
 | Jaringan distribusi otomatis dan koreksinya | Direncanakan | Belum ada graf antartiang |
-| Clustering pelanggan dan penempatan FAT | Direncanakan | FAT demo bukan hasil algoritma |
-| Penempatan FDT | Direncanakan | FDT demo bukan hasil optimasi |
+| Clustering pelanggan dan penempatan FAT | Direncanakan | Belum ada algoritma penempatan FAT |
+| Penempatan FDT | Direncanakan | Belum ada algoritma penempatan FDT |
 | Link budget | Direncanakan | Belum ada model perangkat atau kalkulasi |
 | BoQ dan ekspor CSV/Excel | Direncanakan | Belum ada aturan kuantitas atau tabel material |
 
@@ -171,7 +171,7 @@ Semua mekanisme dalam bagian ini adalah rancangan kebutuhan, kecuali dinyatakan 
 - **Mekanisme sederhana:** jadikan tiang kandidat simpul graf dan koridor yang diizinkan sebagai kandidat koneksi. Hitung panjang tiap segmen, saring dengan batas bentang, lalu susun usulan koneksi sesuai cakupan yang dibutuhkan. Bila koridor belum ada, koneksi berdasarkan kedekatan hanya usulan awal untuk pemeriksaan lapangan. Pengguna harus dapat menambah/menghapus koneksi secara manual; tandai simpul yang tidak terhubung.
 - **Output:** geometri jalur distribusi, urutan atau daftar koneksi tiang, panjang setiap segmen, dan daftar tiang tidak terhubung.
 - **Parameter:** batas jarak antartiang, koridor yang diizinkan, hambatan, aturan pemilihan koneksi, serta titik awal/tujuan — **Perlu ditentukan**.
-- **Status:** **Direncanakan**. Saat ini hanya ada marker tiang dan entri kabel demo tanpa geometri rute.
+- **Status:** **Direncanakan**. Saat ini hanya dapat menampilkan marker titik impor; graf dan geometri rute belum tersedia.
 
 ### 8.2 Penempatan FAT otomatis dan clustering rumah berdasarkan kabel drop
 
@@ -191,7 +191,7 @@ Semua mekanisme dalam bagian ini adalah rancangan kebutuhan, kecuali dinyatakan 
 - **Mekanisme sederhana:** bandingkan kandidat tiang berdasarkan jarak melalui jaringan kabel ke kelompok FAT, lalu periksa kapasitas, konektivitas, akses pemasangan, dan hubungan ke sumber. Lokasi akhir harus berada di titik yang memungkinkan pemasangan dan dapat dikoreksi manual. Kebutuhan beberapa FDT harus dievaluasi berdasarkan kapasitas dan cakupan; jangan menetapkan satu FDT untuk semua kondisi.
 - **Output:** lokasi FDT, daftar FAT yang dilayani, jalur penghubung, dan peringatan kapasitas/konektivitas.
 - **Parameter:** kapasitas FDT, cakupan, bobot kriteria sentralitas, batas jalur, kandidat lokasi, dan aturan koneksi sumber — **Perlu ditentukan**.
-- **Status:** **Direncanakan**. FDT pada peta saat ini adalah data demo statis.
+- **Status:** **Direncanakan**. Belum ada pemilihan lokasi FDT otomatis.
 
 ### 8.4 Perhitungan power link budget
 
@@ -221,7 +221,7 @@ Hasil merupakan estimasi perencanaan; nilai OPM aktual diperoleh dari pengukuran
 - **Mekanisme sederhana:** hitung jumlah objek/perangkat berdasarkan ID unik, jumlahkan panjang rute tiap jenis kabel, lalu terapkan aturan cadangan sekali saja. Pisahkan tiang existing hasil survei dari kebutuhan tiang baru. Komponen tanpa aturan perhitungan diberi status input manual atau belum dihitung, bukan diasumsikan nol.
 - **Output:** tabel item, spesifikasi, satuan, kuantitas, dan dasar perhitungan; harga satuan serta total biaya opsional. Ekspor CSV atau Excel direncanakan.
 - **Parameter:** katalog item, satuan, klasifikasi existing/baru, pembulatan, persentase/aturan cadangan, dan harga opsional — **Perlu ditentukan**.
-- **Status:** **Direncanakan**. Jumlah kategori dalam viewer bukan rekap BoQ; nilai panjang statis bukan dasar kuantitas material.
+- **Status:** **Direncanakan**. Jumlah kategori dalam viewer bukan rekap BoQ; panjang garis belum dihitung dan tidak dapat menjadi dasar kuantitas material.
 
 Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadangan tidak dihitung dua kali. Aturan kebutuhan tiang baru, aksesoris, dan material lain belum tersedia.
 
@@ -229,7 +229,7 @@ Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadanga
 
 | Data/parameter | Kondisi saat ini | Keputusan/kebutuhan berikutnya |
 | --- | --- | --- |
-| Koordinat dan ID unik tiang/rumah | Demo dan impor titik; ID impor tidak stabil | Identitas survei permanen, validasi rentang, deduplikasi: **Perlu ditentukan** |
+| Koordinat dan ID unik tiang/rumah | Impor titik; ID impor tidak stabil | Identitas survei permanen, validasi rentang, deduplikasi: **Perlu ditentukan** |
 | Nama, kategori, sumber, properti tambahan | Nama/sumber disimpan; kategori dari nama | Skema atribut, pemetaan kategori, pelestarian properti: **Perlu ditentukan** |
 | Koneksi antartiang/jalan/koridor | Belum tersedia sebagai graf | Sumber data, arah koneksi dan kelayakan lintasan: **Perlu ditentukan** |
 | Lokasi sumber jaringan/OLT | Belum tersedia | Koordinat, kapasitas, titik sambung: **Perlu ditentukan** |
@@ -241,7 +241,7 @@ Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadanga
 | Klasifikasi tiang existing/baru | Belum ada field khusus | Aturan status aset dan kebutuhan baru: **Perlu ditentukan** |
 | Jumlah data yang harus didukung | Belum ditetapkan | Target volume, perangkat uji, waktu respons: **Perlu ditentukan** |
 
-Angka awal input buffer “100”, koordinat/pusat peta Bandung, zoom `14`, angka panjang demo, dan skala statis merupakan nilai UI/demo; bukan parameter teknik FTTH yang telah disepakati. Asumsi CRS data impor perlu diverifikasi; kode belum melakukan reproyeksi.
+Angka awal input buffer “100”, koordinat/pusat peta Bandung, dan zoom `14` merupakan nilai awal antarmuka; bukan parameter teknik FTTH yang telah disepakati. Asumsi CRS data impor perlu diverifikasi; kode belum melakukan reproyeksi.
 
 ## 10. Tahapan pengembangan
 
@@ -258,11 +258,11 @@ Setiap tahap memerlukan pemeriksaan manual dan data uji sebelum melanjutkan otom
 
 ## 11. Keterbatasan dan kebutuhan data
 
-- Data demo harus dibedakan dari survei nyata. Data impor masih bercampur dengan demo; belum ada manajemen proyek/file yang lengkap.
+- Viewer mulai kosong dan hanya memuat data hasil impor. Belum ada manajemen proyek/file yang lengkap; jumlah sumber dihitung dari nama file unik.
 - Parser KML dapat salah menafsirkan garis atau poligon sebagai titik. KMZ, ExtendedData, geometri kompleks, dan validasi kesalahan masih perlu ditangani.
 - Belum ada persistence, editor koordinat/kategori, undo/redo, atau koreksi koneksi. Muat ulang menghapus data impor.
 - Banyak titik dapat menyebabkan kepadatan visual. Clustering tampilan, label berdasarkan zoom, dan filter layer merupakan kebutuhan; saat ini belum lengkap.
-- Panjang impor, skala, status pemetaan, buffer, dan mode ukur pada UI tidak boleh dipakai sebagai hasil teknik yang sah.
+- Panjang impor belum dihitung, skala belum ditampilkan, serta buffer dan mode ukur belum lengkap. Status “Data dimuat” hanya menandakan adanya fitur impor, bukan validasi teknis survei.
 - Data jalan/koridor, akses pemasangan, hambatan, kapasitas, OLT, dan spesifikasi optik harus dilengkapi sebelum hasil otomatis dianggap layak ditinjau.
 - Akurasi dan kelayakan pemasangan harus diperiksa terhadap koordinat survei serta kondisi lapangan; screenshot tidak cukup.
 - Tidak ditemukan script lint/test dan rangkaian uji otomatis project. `typescript.ignoreBuildErrors: true` membuat build produksi tidak menjadi bukti kelulusan pemeriksaan tipe.
@@ -305,10 +305,10 @@ Daftar berikut adalah kriteria pemeriksaan, **bukan klaim semua telah lulus**.
 
 ### Viewer saat ini dan penyelesaian tahap 1
 
-- Pastikan halaman `/` terbuka, marker demo tampil, zoom, fit, pencarian, pemilihan dan salin koordinat bekerja sesuai dukungan browser.
+- Pastikan halaman `/` terbuka tanpa marker survei, jumlah file/fitur/kategori nol, dan petunjuk impor tampil. Tombol fit serta ekspor dinonaktifkan saat tidak ada data yang relevan. Setelah impor KML titik, periksa zoom, fit, pencarian, pemilihan dan salin koordinat sesuai dukungan browser.
 - Uji KML titik kecil dengan koordinat yang diketahui; bandingkan lokasi, kategori, nama dan sumber dengan file asli.
 - Untuk rumah terpilih, periksa estimasi tiang terdekat menggunakan jarak geospasial dalam meter; jangan menganggapnya panjang kabel aktual.
-- Uji pencarian dan ekspor dengan fitur Point saja. Periksa urutan longitude, latitude. Ekspor semua data demo belum memenuhi kriteria geometri karena entri kabelnya tidak valid.
+- Uji pencarian dan ekspor dengan fitur Point saja. Periksa urutan longitude, latitude. Ekspor dinonaktifkan bila hasil pencarian kosong; dukungan garis/poligon tetap perlu diperbaiki sebelum parser diperluas.
 - Sebelum menyatakan dukungan KML/KMZ lengkap, uji arsip berisi KML, XML rusak, geometri campuran, koordinat kosong/di luar rentang, properti tambahan, ID ganda, dan impor ulang. Hasil harus memberi laporan penerimaan/penolakan yang jelas.
 - Sebelum menyatakan filter, pengukuran, buffer, atau ringkasan siap, pastikan kontrol mengubah data/geometri dan angka berasal dari perhitungan, bukan placeholder.
 - Uji reload agar perilaku kehilangan data sesi dipahami. Persistensi baru boleh dinyatakan tersedia setelah implementasi dan pengujiannya ada.
