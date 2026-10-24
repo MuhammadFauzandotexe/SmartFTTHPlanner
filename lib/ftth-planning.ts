@@ -2,7 +2,7 @@ import { distance, point } from "@turf/turf"
 import { validGeometry, type FeatureItem } from "./survey"
 
 export const DEFAULT_FAT_PORTS = 8
-export const DEFAULT_MAX_DROP_LENGTH_METERS = 100
+export const DEFAULT_MAX_DROP_LENGTH_METERS = 50
 export function validateMaxDropLengthMeters(value: number): number {
   if (!Number.isFinite(value) || value <= 0) throw new RangeError("Maksimum panjang drop harus angka positif dan terbatas dalam meter.")
   return value

@@ -9,7 +9,7 @@
 - `components/ftth-viewer.tsx`: konfigurasi port, survei dan hasil hanya selama sesi; tidak ada penyimpanan proyek permanen. Preferensi layer terpisah memakai localStorage.
 
 ## Selesai pada tahap kecil ini
-- `maxDropLengthMeters` positif dan finite, default demo 100 m yang dapat diubah, bukan standar teknis; mengikuti state sesi existing, disalin ke snapshot hasil.
+- `maxDropLengthMeters` positif dan finite, default demo 50 m yang dapat diubah, bukan standar teknis; mengikuti state sesi existing, disalin ke snapshot hasil.
 - Memeriksa rumah terhadap lokasi FAT final. Jarak di atas batas dilepas, tepat sama diperbolehkan. Tidak menambah FAT atau memaksa semua rumah masuk kelompok.
 - Menyelaraskan anggota, koneksi, port terpakai dan total jarak; kelompok kosong dihapus tanpa penomoran ulang kelompok lain.
 - Input konfigurasi di viewer membuang hasil lama saat nilai valid berubah; hitung ulang manual.
@@ -25,7 +25,7 @@ Belum ada penugasan ulang ke FAT kelompok lain. Pemilihan tiang existing tetap b
 - `node --test tests/ftth-planning.test.cjs tests/application-log.test.cjs tests/map-layer-lifecycle.test.cjs` — lulus untuk ketiga berkas setelah fixture disesuaikan.
 - `./node_modules/.bin/tsc --noEmit` — lulus.
 - Kasus: di bawah/sama/di atas batas, tanpa kandidat/tanpa alternatif penugasan, validasi konfigurasi, kapasitas, konsistensi anggota/koneksi/total, penanda rumah dilepas tanpa link, label estimasi, serta perubahan batas menghapus hasil lama.
-- KMZ sampel diuji end-to-end oleh test existing dengan batas longgar eksplisit untuk mempertahankan pengujian pengelompokan; bukan bukti cakupan pada batas demo 100 m.
+- KMZ sampel diuji end-to-end oleh test existing dengan batas longgar eksplisit untuk mempertahankan pengujian pengelompokan; bukan bukti cakupan pada batas demo 50 m.
 - Tidak menjalankan production build, pemeriksaan visual browser, atau perbandingan terarah kasus G026. Tidak ada kegagalan tersisa pada pemeriksaan yang dijalankan.
 - Workspace sudah berisi perubahan lokal sebelum sesi ini; perubahan tersebut dipertahankan. Tidak membuat commit/push.
 

@@ -337,7 +337,7 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   const harness = hooks()
   const recordedLogs = []
   const runs = []
-  const data = [...Array.from({ length: 51 }, (_, index) => ({ id: `h${index}`, name: `h${index}`, category: 'Rumah', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107 + index * 0.00001], geometry: { type: 'Point', coordinates: [107 + index * 0.00001, -6] }, props: {} })), { id: 'p', name: 'pole', category: 'Tiang', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107], geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }]
+  const data = [...Array.from({ length: 51 }, (_, index) => ({ id: `h${index}`, name: `h${index}`, category: 'Rumah', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107 + index * 0.000005], geometry: { type: 'Point', coordinates: [107 + index * 0.000005, -6] }, props: {} })), { id: 'p', name: 'pole', category: 'Tiang', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107], geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }]
   const addLogs = logs => recordedLogs.push(...logs)
   const layerSettings = preferences.defaultLayerSettings()
   const overrides = {
@@ -390,6 +390,7 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   tree = harness.render(Viewer)
   assert.deepEqual(runs, [25])
   assert.equal(panel(tree).props.plan.fatPorts, 25)
+  assert.equal(panel(tree).props.plan.maxDropLengthMeters, 50)
   assert.equal(panel(tree).props.plan.groups.length, 3)
   assert.equal(panel(tree).props.resultsOpen, true)
   const firstPlan = panel(tree).props.plan

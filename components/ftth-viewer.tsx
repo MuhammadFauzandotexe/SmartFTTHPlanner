@@ -242,7 +242,7 @@ export default function FtthViewer() {
               setHighlightedGroupId(null)
               setHoveredGroupId(null)
             }} />
-            <p className="text-[11px] text-slate-500">100 m adalah nilai awal demo yang dapat diubah, bukan standar teknis. Konfigurasi selama sesi; perubahan menghapus hasil lama, hitung ulang secara manual.</p>
+            <p className="text-[11px] text-slate-500">50 m adalah nilai awal demo yang dapat diubah, bukan standar teknis. Konfigurasi selama sesi; perubahan menghapus hasil lama, hitung ulang secara manual.</p>
             <label htmlFor="fat-port-count" className="block text-xs font-medium">Jumlah port FAT</label>
             <select id="fat-port-count" value={fatPorts} disabled={importing} onChange={event => changeFatPorts(Number(event.target.value))} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
               {Array.from({ length: MAX_FAT_PORTS }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} port{value === DEFAULT_FAT_PORTS ? " (default)" : ""}</option>)}
