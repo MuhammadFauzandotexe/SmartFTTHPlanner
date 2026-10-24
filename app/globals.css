@@ -156,6 +156,30 @@
 .leaflet-container { font-family: inherit; }
 .leaflet-control-attribution { font-size: 9px; }
 
+.survey-house-marker {
+  background: transparent;
+  border: 0;
+}
+
+.survey-house-marker__symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 2px solid white;
+  border-radius: 6px;
+  background: #2563eb;
+  color: white;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 45%);
+}
+
+.survey-house-marker:hover .survey-house-marker__symbol,
+.survey-house-marker:focus-visible .survey-house-marker__symbol {
+  background: #1d4ed8;
+  box-shadow: 0 0 0 3px rgb(59 130 246 / 35%), 0 2px 6px rgb(15 23 42 / 45%);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

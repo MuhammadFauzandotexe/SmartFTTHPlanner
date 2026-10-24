@@ -26,6 +26,7 @@ export function parseCategory(name: string, geometry: Geometry): Category {
   if (n.includes("FAT")) return "FAT"
   if (n.includes("POLE") || n.includes("TIANG")) return "Tiang"
   if (n.includes("RUMAH") || n.includes("HOME") || n.includes("PELANGGAN")) return "Rumah"
+  if (geometry.type === "Point" && /^\d+$/.test(name.trim())) return "Rumah"
   return "Belum dikategorikan"
 }
 
@@ -71,6 +72,6 @@ export function toGeoJSON(item: FeatureItem): Feature {
     type: "Feature",
     id: item.id,
     geometry: item.geometry,
-    properties: { ...item.props, id: item.id, name: item.name, category: item.category, source: item.file, kmlFile: item.kmlFile },
+    properties: { id: item.id, name: item.name, category: item.category, source: item.file, kmlFile: item.kmlFile, ...item.props },
   }
 }

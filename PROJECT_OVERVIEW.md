@@ -82,6 +82,7 @@ lib/
   utils.ts                 Helper penggabungan class CSS
   survey.ts                Model data, kategori, validasi dan ekspor geometri
   import-survey.ts          Pembaca KML/KMZ dan laporan impor
+  kml-metadata.ts           Pembaca SchemaData, resolusi schema lokal, peringatan metadata
 tests/
   import-survey.test.cjs    Uji parser, arsip, geometri, dan file contoh
 Data-Mentah.kmz             Berkas survei di root; tidak dimuat otomatis
@@ -107,6 +108,16 @@ Point, LineString, Polygon, bentuk Multi, serta GeometryCollection dipertahankan
 
 Arsip rusak/terenkripsi, arsip tanpa KML, dan file tanpa fitur valid menghasilkan pesan gagal. Bila satu KML dalam arsip gagal tetapi KML lain valid, fitur valid tetap dimuat dengan peringatan. NetworkLink eksternal tidak diambil dan gambar GroundOverlay tidak dirender. Ikon, foto, dan styling khusus KML tidak direproduksi; viewer memakai warna kategori sendiri.
 
+### SchemaData dan schema yang tidak ditemukan
+
+`SchemaData/SimpleData` dibaca kembali dari XML asli dan digabungkan ke `properties` GeoJSON, termasuk `HPTAR_ID`. Pembacaan tambahan diperlukan karena `@tmcw/togeojson` 7.1.3 memilih tipe field berdasarkan nama di seluruh dokumen, bukan berdasarkan `schemaUrl`. Konverter menerima salinan XML tanpa SchemaData; seluruh atribut SchemaData kemudian dikembalikan dari sumber asli tanpa memodifikasi geometri hasil konversi.
+
+Referensi schema hanya dicocokkan dengan definisi `Schema` di dokumen yang sama atau KML lain yang sudah ada di dalam KMZ, termasuk jalur relatif. Schema eksternal tidak diambil otomatis. Jika definisi schema/field/tipe tidak ditemukan, nilainya tetap string apa adanya, termasuk nol di depan, spasi, dan string kosong. Tipe hanya diterapkan bila field memiliki definisi eksplisit pada schema yang dirujuk; tipe tidak dikenal atau nilai bertipe tidak valid tetap string.
+
+Schema yang hilang tidak menggagalkan fitur dengan geometri valid. Panel **Peringatan metadata** mengelompokkan peringatan per sumber KML dan `schemaUrl`, dengan daftar nama serta ID asli fitur; bila ID asli tidak ada, digunakan ID internal. Tidak ada popup per fitur. **Masalah geometri** ditampilkan terpisah dan hanya menjelaskan fitur yang tidak dapat dimuat karena geometrinya. Peringatan tetap tersedia bila seluruh geometri gagal.
+
+Ekspor memprioritaskan nama/nilai atribut asli apabila bertabrakan dengan nama properti tambahan viewer seperti `id`, `name`, atau `source`. ID internal fitur tetap tersedia pada anggota `id` GeoJSON di luar `properties`.
+
 ### Model data
 
 `lib/survey.ts` mendefinisikan model bersama untuk importer dan peta:
@@ -126,9 +137,9 @@ type FeatureItem = {
 }
 ```
 
-Geometri GeoJSON memakai **longitude, latitude**; altitude dipertahankan jika tersedia. `coords` hanya titik pertama untuk panel detail, bukan pengganti geometri penuh. Label panel membedakan “Latitude, Longitude” untuk Point dan “Titik awal (Lat, Lon)” untuk bentuk lain. ID KML asli disimpan sebagai `props.originalId` bila ada; ID internal bukan identitas survei permanen.
+Geometri GeoJSON memakai **longitude, latitude**; altitude dipertahankan jika tersedia. `coords` hanya titik pertama untuk panel detail, bukan pengganti geometri penuh. Label panel membedakan “Latitude, Longitude” untuk Point dan “Titik awal (Lat, Lon)” untuk bentuk lain. ID KML asli disimpan sebagai `props.originalId` bila ada dan tidak berbenturan dengan atribut asli bernama sama; ID internal bukan identitas survei permanen.
 
-Garis dan MultiLineString dikategorikan sebagai “Jalur kabel”. Untuk bentuk lain, nama diperiksa untuk FDT, FAT, POLE/TIANG, dan RUMAH/HOME/PELANGGAN; sisanya “Belum dikategorikan”. Editor kategori belum tersedia. Impor ulang menambahkan objek dengan ID internal baru; belum ada deduplikasi otomatis.
+Garis dan MultiLineString dikategorikan sebagai “Jalur kabel”. Untuk bentuk lain, nama diperiksa untuk FDT, FAT, POLE/TIANG, dan RUMAH/HOME/PELANGGAN. Khusus geometri Point, nama yang hanya berisi angka (misalnya `29` atau `001`, dengan spasi di awal/akhir diabaikan) juga dikategorikan sebagai “Rumah”; nama dan koordinat asli tetap dipertahankan. Sisanya “Belum dikategorikan”. Editor kategori belum tersedia. Impor ulang menambahkan objek dengan ID internal baru; belum ada deduplikasi otomatis.
 
 ### Tampilan dan ekspor
 
@@ -144,7 +155,7 @@ Jumlah file dihitung dari nama sumber unik pada fitur valid: dua file bernama sa
 
 | Fitur | Status | Kondisi konkret |
 | --- | --- | --- |
-| Peta dan geometri berwarna | Tersedia | OpenStreetMap, marker titik, garis kabel, poligon, dan geometri campuran melalui GeoJSON |
+| Peta dan geometri berwarna | Tersedia | OpenStreetMap, ikon rumah biru untuk titik kategori Rumah, lingkaran untuk titik kategori lain, garis kabel, poligon, dan geometri campuran melalui GeoJSON |
 | Zoom, fit bounds, buka/tutup sidebar | Tersedia | Fit memakai seluruh fitur, bukan hanya hasil pencarian |
 | Pencarian nama/ID | Tersedia | Menyaring marker, jumlah terlihat, dan data ekspor |
 | Pemilihan objek dan salin koordinat | Tersedia | Panel kategori, nama, ID, sumber, koordinat; Clipboard API memerlukan izin/konteks browser yang mendukung |
@@ -158,7 +169,7 @@ Jumlah file dihitung dari nama sumber unik pada fitur valid: dua file bernama sa
 | Ukur jarak | Sebagian | State dan rumus ada; klik peta belum mengisi titik ukur dan hasil belum ditampilkan |
 | Buffer | Sebagian | Input awal “100” dan pemanggilan toast saja; tidak membuat atau menggambar geometri buffer |
 | Koordinat kursor dan skala | Sebagian | Koordinat kursor masih “—”; skala dummy dihapus, perhitungan skala belum tersedia |
-| Notifikasi | Tersedia | Toast dan panel hasil impor dengan pesan tiap file |
+| Notifikasi | Tersedia | Satu toast hasil impor; panel umum, kelompok peringatan metadata berisi nama/ID/schema, dan masalah geometri yang terpisah |
 | Clustering marker / label berdasarkan zoom | Direncanakan | Dependency clustering belum digunakan |
 | Validasi, deduplikasi, koreksi manual survei | Sebagian | Validasi XML/koordinat/geometri dasar tersedia; deduplikasi, validasi topologi dan editor belum ada |
 | Penyimpanan proyek | Direncanakan | Hanya state selama sesi; muat ulang kehilangan impor |

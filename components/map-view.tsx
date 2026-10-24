@@ -13,6 +13,14 @@ type MapViewProps = {
   showLabels?: boolean
 }
 
+const houseIcon = L.divIcon({
+  className: "survey-house-marker",
+  html: '<span class="survey-house-marker__symbol"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></svg></span>',
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
+  tooltipAnchor: [0, -12],
+})
+
 function MapInitializer({ onReady }: { onReady?: (map: L.Map) => void }) {
   const map = useMap()
   useEffect(() => { onReady?.(map) }, [map, onReady])
@@ -27,7 +35,12 @@ function SurveyLayer({ feature, onSelect, showLabels }: { feature: FeatureItem; 
     key={`${feature.id}-${Boolean(showLabels)}`}
     data={toGeoJSON(feature)}
     style={geoFeature => ({ color, weight: 3, fillColor: color, fillOpacity: geoFeature?.geometry.type === "Point" || geoFeature?.geometry.type === "MultiPoint" ? 0.85 : 0.15 })}
-    pointToLayer={(_, latlng) => L.circleMarker(latlng, {
+    pointToLayer={(_, latlng) => feature.category === "Rumah" ? L.marker(latlng, {
+      icon: houseIcon,
+      title: `Rumah: ${feature.name}`,
+      keyboard: true,
+      riseOnHover: true,
+    }) : L.circleMarker(latlng, {
       pane: "markerPane",
       radius: feature.category === "Tiang" ? 5 : 7,
       color, fillColor: color, fillOpacity: 0.85, weight: 2,
