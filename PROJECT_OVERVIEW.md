@@ -65,7 +65,7 @@ Versi berikut adalah deklarasi `package.json`; awalan `^` merupakan rentang vers
 
 Arsitektur: `app/page.tsx` merender `FtthViewer`, komponen client yang menyimpan data melalui React state. Komponen itu memuat `MapView` di browser. Pembacaan memakai File API, JSZip untuk KMZ, `DOMParser`, dan togeojson. Ekspor menggunakan Blob dan tautan unduhan.
 
-Tidak ditemukan API route, database, backend domain terpisah, penyimpanan localStorage/IndexedDB, maupun mesin perencanaan jaringan. Next.js tetap membutuhkan runtime Node.js untuk perintah pengembangan dan server produksi yang tersedia. Tile OpenStreetMap memerlukan akses jaringan; belum ada dukungan peta offline.
+Tidak ditemukan API route, database, backend domain terpisah, IndexedDB, maupun mesin perencanaan jaringan. Preferensi Layer Settings disimpan di localStorage; data survei tetap hanya dalam React state. Next.js tetap membutuhkan runtime Node.js untuk perintah pengembangan dan server produksi yang tersedia. Tile OpenStreetMap dan Esri World Imagery memerlukan akses jaringan; belum ada dukungan peta offline.
 
 ## 5. Struktur folder penting
 
@@ -76,14 +76,20 @@ app/
   globals.css              Tailwind, tema, penyesuaian Leaflet
 components/
   ftth-viewer.tsx           State, impor, pencarian, ekspor, panel
-  map-view.tsx              Peta Leaflet, tile, marker, callback pemilihan
+  map-view.tsx              Peta Leaflet, basemap, pane kategori dan pembaruan layer
+  layer-settings.tsx        Panel visibility, styling, urutan dan basemap
   ui/                      Button, Badge, Input, Separator
 lib/
   utils.ts                 Helper penggabungan class CSS
   survey.ts                Model data, kategori, validasi dan ekspor geometri
+  layer-settings.ts        Preferensi awal, validasi, urutan dan penyedia tile
   import-survey.ts          Pembaca KML/KMZ dan laporan impor
   kml-metadata.ts           Pembaca SchemaData, resolusi schema lokal, peringatan metadata
+hooks/
+  use-layer-settings.ts    Pemulihan dan penyimpanan preferensi localStorage
 tests/
+  layer-settings.test.cjs   Uji validasi, urutan dan geometri campuran
+  map-layer-lifecycle.test.cjs Uji kontrak renderer dan persistence dengan mock
   import-survey.test.cjs    Uji parser, arsip, geometri, dan file contoh
 Data-Mentah.kmz             Berkas survei di root; tidak dimuat otomatis
 package.json               Dependency dan script
@@ -96,7 +102,7 @@ tsconfig.json              Konfigurasi TypeScript dan alias @/*
 components.json            Konfigurasi shadcn dan alias
 ```
 
-Folder `hooks/` hanya disebut sebagai alias pada konfigurasi shadcn; belum ditemukan sebagai folder implementasi. `node_modules/` dan `.next/` adalah hasil instalasi/build, bukan sumber fitur.
+`node_modules/` dan `.next/` adalah hasil instalasi/build, bukan sumber fitur.
 
 ## 6. Format input dan struktur data
 
@@ -149,13 +155,25 @@ Jumlah file dihitung dari nama sumber unik pada fitur valid: dua file bernama sa
 
 `Data-Mentah.kmz` tidak dimuat otomatis. Pengujian parser pada file tersebut menghasilkan **244 fitur: 243 Point dan 1 Polygon**. Screenshot peta tetap bukan pengganti koordinat asli atau pemeriksaan lapangan.
 
+### Layer Settings
+
+Buka tombol **Layer Settings** di kanan atas peta. Panel dapat ditutup lewat tombol X atau Escape; fokus kembali ke tombol pembuka. Panel memakai komponen UI yang ada, input warna/range/radio/checkbox native, dan lebar yang menyesuaikan viewport kecil.
+
+Pengaturan tersedia untuk enam kategori yang sudah ada: Tiang, Rumah, FAT, FDT, Jalur kabel, dan Belum dikategorikan. Setiap kategori memiliki visibility dan warna sendiri. Ukuran marker adalah diameter 8–40 px; ketebalan garis 1–10 px. Kontrol transparansi poligon ditampilkan jika kategori berisi poligon, termasuk geometri campuran. Warna yang dipilih berlaku pada geometri kategori tersebut. Urutan paling atas pada daftar tampil di depan melalui pane Leaflet; tombol naik/turun memengaruhi vektor dan ikon rumah.
+
+Instance MapContainer dipertahankan. Pergantian basemap hanya mengganti TileLayer, sedangkan visibility menambah/melepas group kategori yang sama. Styling memakai setStyle, setRadius dan setIcon; label diperbarui tanpa membangun ulang geometri. Data dan hasil ekspor tetap mengikuti pencarian seperti sebelumnya; visibility hanya mengubah tampilan peta dan jumlah fitur terlihat.
+
+Preferensi disimpan dengan key `smart-ftth-planner.layer-settings.v1` setelah proses pemulihan selesai agar nilai awal tidak menimpa preferensi tersimpan. Data tersimpan divalidasi: kategori tidak dikenal dibuang, urutan dideduplikasi, nilai numerik dibatasi dan warna harus hex. Jika localStorage tidak tersedia, kontrol tetap bekerja selama sesi dan panel memberi status penyimpanan. Tombol reset mengembalikan preferensi awal. Pengaturan tidak menyimpan data survei, koordinat tampilan atau tingkat zoom.
+
+Peta jalan menggunakan endpoint HTTPS OpenStreetMap dengan atribusi yang tetap terlihat dan caching bawaan browser, tanpa unduhan offline/prefetch. Citra satelit memakai layanan publik Esri World Imagery dengan kredit sumber layanan dan tautan atribusi; ketentuan penyedia dapat dibuka dari panel. Referensi: [OSM Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/), [World Imagery](https://goto.arcgisonline.com/maps/World_Imagery), dan [Esri Service Terms](https://www.esri.com/en-us/legal/terms/web-site-service). Resolusi citra bergantung lokasi; di atas zoom native 19, tile diperbesar hingga zoom 22.
+
 ## 7. Fitur viewer dan status implementasi
 
 **Tersedia** berarti ada mekanisme dalam kode untuk lingkup yang disebutkan, bukan pernyataan bahwa seluruh skenario telah lulus uji. **Sebagian** berarti ada pembatasan atau UI tanpa mekanisme lengkap. **Direncanakan** berarti belum ditemukan implementasinya.
 
 | Fitur | Status | Kondisi konkret |
 | --- | --- | --- |
-| Peta dan geometri berwarna | Tersedia | OpenStreetMap, ikon rumah biru untuk titik kategori Rumah, lingkaran untuk titik kategori lain, garis kabel, poligon, dan geometri campuran melalui GeoJSON |
+| Peta dan geometri berwarna | Tersedia | OpenStreetMap, ikon rumah untuk kategori Rumah, ikon tiang dengan palang untuk kategori Tiang, lingkaran untuk titik kategori lain, garis kabel, poligon, dan geometri campuran melalui GeoJSON |
 | Zoom, fit bounds, buka/tutup sidebar | Tersedia | Fit memakai seluruh fitur, bukan hanya hasil pencarian |
 | Pencarian nama/ID | Tersedia | Menyaring marker, jumlah terlihat, dan data ekspor |
 | Pemilihan objek dan salin koordinat | Tersedia | Panel kategori, nama, ID, sumber, koordinat; Clipboard API memerlukan izin/konteks browser yang mendukung |
@@ -164,7 +182,11 @@ Jumlah file dihitung dari nama sumber unik pada fitur valid: dua file bernama sa
 | Impor KMZ | Tersedia | Ekstraksi seluruh KML termasuk subfolder; laporan sukses/peringatan/gagal; auto-fit hasil impor |
 | Ekspor GeoJSON | Tersedia | Mengunduh hasil pencarian dengan geometri asli, atribut dan sumber KML/KMZ |
 | Ringkasan survei | Tersedia | Jumlah sumber file, fitur, kategori, status dan panjang garis berdasarkan hasil impor |
-| Filter layer/kategori | Sebagian | Tombol kategori tidak mengubah fitur; belum menyembunyikan layer |
+| Filter layer/kategori | Tersedia | Visibility independen lewat tombol kategori dan panel Layer Settings; tidak menghapus data survei |
+| Base map | Tersedia | Peta jalan OpenStreetMap dan citra Esri World Imagery; pergantian hanya mengganti tile |
+| Styling layer | Tersedia | Warna, diameter marker, ketebalan garis dan transparansi poligon; berlaku langsung |
+| Urutan layer | Tersedia | Tombol naik/turun mengubah z-index pane tiap kategori, termasuk ikon rumah dan tiang |
+| Preferensi layer | Tersedia | Disimpan di localStorage dan dipulihkan saat halaman dibuka; reset dan fallback bila storage tidak tersedia |
 | Label | Sebagian | Tooltip teks saat hover; dinonaktifkan saat opsi mati; belum berbasis zoom |
 | Ukur jarak | Sebagian | State dan rumus ada; klik peta belum mengisi titik ukur dan hasil belum ditampilkan |
 | Buffer | Sebagian | Input awal “100” dan pemanggilan toast saja; tidak membuat atau menggambar geometri buffer |
@@ -266,7 +288,7 @@ Angka awal input buffer “100”, koordinat/pusat peta Bandung, dan zoom `14` m
 
 | Tahap | Lingkup dan hasil yang dituju | Kondisi saat ini |
 | --- | --- | --- |
-| 1. Viewer dan validasi survei | Impor KML/KMZ lengkap, normalisasi GeoJSON, validasi, kategori, detail, filter, ekspor valid | Sebagian: impor KML/KMZ, geometri, ekspor dan validasi dasar tersedia; filter/editor belum lengkap |
+| 1. Viewer dan validasi survei | Impor KML/KMZ lengkap, normalisasi GeoJSON, validasi, kategori, detail, filter, ekspor valid | Sebagian: impor KML/KMZ, geometri, ekspor dan validasi dasar tersedia; editor belum tersedia |
 | 2. Jaringan antartiang | Graf koridor, usulan koneksi, koreksi manual, tanda tidak terhubung, panjang segmen | Direncanakan |
 | 3. Clustering rumah dan FAT | Penempatan pada tiang, kapasitas port, rute drop, rumah belum terlayani | Direncanakan |
 | 4. FDT dan sumber jaringan | Sentralitas melalui graf, kapasitas/cakupan, koneksi sumber, koreksi lokasi | Direncanakan |
@@ -279,8 +301,8 @@ Setiap tahap memerlukan pemeriksaan manual dan data uji sebelum melanjutkan otom
 
 - Viewer mulai kosong dan hanya memuat data hasil impor. Belum ada manajemen proyek/file yang lengkap; jumlah sumber dihitung dari nama file unik.
 - NetworkLink eksternal, gambar GroundOverlay, ikon/foto dalam arsip, dan styling KML khusus belum ditampilkan. Validasi topologi, deduplikasi dan target volume data belum ditetapkan.
-- Belum ada persistence, editor koordinat/kategori, undo/redo, atau koreksi koneksi. Muat ulang menghapus data impor.
-- Banyak titik dapat menyebabkan kepadatan visual. Clustering tampilan, label berdasarkan zoom, dan filter layer merupakan kebutuhan; saat ini belum lengkap.
+- Preferensi layer tersimpan di localStorage, tetapi data survei belum memiliki persistence. Belum ada editor koordinat/kategori, undo/redo, atau koreksi koneksi. Muat ulang menghapus data impor.
+- Banyak titik dapat menyebabkan kepadatan visual. Filter layer sudah tersedia. Clustering tampilan dan label berdasarkan zoom belum tersedia.
 - Panjang garis geospasial telah dihitung; ini bukan hasil perencanaan kabel beserta cadangannya. Skala belum ditampilkan, serta buffer dan mode ukur belum lengkap. Status “Data dimuat” hanya menandakan adanya fitur impor, bukan validasi teknis survei.
 - Data jalan/koridor, akses pemasangan, hambatan, kapasitas, OLT, dan spesifikasi optik harus dilengkapi sebelum hasil otomatis dianggap layak ditinjau.
 - Akurasi dan kelayakan pemasangan harus diperiksa terhadap koordinat survei serta kondisi lapangan; screenshot tidak cukup.
@@ -330,8 +352,9 @@ Daftar berikut adalah kriteria pemeriksaan, **bukan klaim semua telah lulus**.
 - Untuk rumah terpilih, periksa estimasi tiang terdekat menggunakan jarak geospasial dalam meter; jangan menganggapnya panjang kabel aktual.
 - Uji pencarian dan ekspor Point, LineString, Polygon berlubang, serta geometri campuran. Periksa urutan longitude, latitude dan kesamaan geometri; ekspor dinonaktifkan bila hasil pencarian kosong.
 - Sebelum menyatakan dukungan KML/KMZ lengkap, uji arsip berisi KML, XML rusak, geometri campuran, koordinat kosong/di luar rentang, properti tambahan, ID ganda, dan impor ulang. Hasil harus memberi laporan penerimaan/penolakan yang jelas.
-- Sebelum menyatakan filter, pengukuran, buffer, atau ringkasan siap, pastikan kontrol mengubah data/geometri dan angka berasal dari perhitungan, bukan placeholder.
+- Sebelum menyatakan pengukuran atau buffer siap, pastikan kontrol mengubah data/geometri dan angka berasal dari perhitungan, bukan placeholder.
 - Uji reload agar perilaku kehilangan data sesi dipahami. Persistensi baru boleh dinyatakan tersedia setelah implementasi dan pengujiannya ada.
+- Uji pergantian basemap tanpa kehilangan layer/pusat peta; visibility tiap kategori; warna/ukuran/garis/transparansi; urutan depan/belakang; tutup/buka panel; reload preferensi, storage rusak dan storage tidak tersedia. Uji kontrak renderer memakai mock Leaflet dan hook, sehingga tidak menggantikan pemeriksaan visual browser.
 - Jalankan instalasi, build dan smoke test; catat pemeriksaan tipe secara terpisah karena konfigurasi saat ini mengabaikan error tipe saat build.
 
 ### Tahap perencanaan berikutnya

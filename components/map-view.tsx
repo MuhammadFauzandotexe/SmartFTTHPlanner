@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect } from "react"
-import { GeoJSON, MapContainer, TileLayer, useMap } from "react-leaflet"
+import { useEffect, useMemo, useRef } from "react"
+import { MapContainer, TileLayer, useMap } from "react-leaflet"
 import L from "leaflet"
-import { colors, toGeoJSON, type FeatureItem } from "@/lib/survey"
+import { toGeoJSON, type Category, type FeatureItem } from "@/lib/survey"
+import { baseMaps, categories, layerPaneName, layerZIndex, type LayerSettings, type LayerStyle } from "@/lib/layer-settings"
 import "leaflet/dist/leaflet.css"
 
 type MapViewProps = {
@@ -11,15 +12,32 @@ type MapViewProps = {
   onSelect: (feature: FeatureItem) => void
   onReady?: (map: L.Map) => void
   showLabels?: boolean
+  settings: LayerSettings
 }
 
-const houseIcon = L.divIcon({
-  className: "survey-house-marker",
-  html: '<span class="survey-house-marker__symbol"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></svg></span>',
-  iconSize: [20, 20],
-  iconAnchor: [10, 10],
-  tooltipAnchor: [0, -12],
-})
+function pointIcon(style: LayerStyle, category: "Rumah" | "Tiang") {
+  const className = category === "Tiang" ? "survey-pole-marker" : "survey-house-marker"
+  const size = style.markerSize
+  const symbol = document.createElement("span")
+  symbol.className = `${className}__symbol`
+  symbol.style.width = `${size}px`
+  symbol.style.height = `${size}px`
+  symbol.style.backgroundColor = style.color
+  // Only a fixed SVG is inserted; imported names remain plain text in tooltips.
+  symbol.innerHTML = category === "Tiang"
+    ? '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M4 7h16M7 12h10M6 5v4M18 5v4M9 21h6"/></svg>'
+    : '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-8h6v8"/></svg>'
+  const svg = symbol.querySelector("svg")!
+  svg.setAttribute("width", String(Math.max(6, Math.round(size * 0.65))))
+  svg.setAttribute("height", String(Math.max(6, Math.round(size * 0.65))))
+  return L.divIcon({ className, html: symbol, iconSize: [size, size], iconAnchor: [size / 2, size / 2], tooltipAnchor: [0, -size / 2 - 2] })
+}
+
+function visitLeaves(layer: L.Layer, callback: (leaf: L.Layer) => void) {
+  if (layer instanceof L.LayerGroup) layer.eachLayer(child => visitLeaves(child, callback))
+  else callback(layer)
+}
+const names = new WeakMap<L.Layer, string>()
 
 function MapInitializer({ onReady }: { onReady?: (map: L.Map) => void }) {
   const map = useMap()
@@ -27,39 +45,81 @@ function MapInitializer({ onReady }: { onReady?: (map: L.Map) => void }) {
   return null
 }
 
-function SurveyLayer({ feature, onSelect, showLabels }: { feature: FeatureItem; onSelect: MapViewProps["onSelect"]; showLabels?: boolean }) {
-  // Recreate immutable GeoJSON layers when label mode changes. Tooltip text uses
-  // a DOM text node so names from imported files are never interpreted as HTML.
-  const color = colors[feature.category]
-  return <GeoJSON
-    key={`${feature.id}-${Boolean(showLabels)}`}
-    data={toGeoJSON(feature)}
-    style={geoFeature => ({ color, weight: 3, fillColor: color, fillOpacity: geoFeature?.geometry.type === "Point" || geoFeature?.geometry.type === "MultiPoint" ? 0.85 : 0.15 })}
-    pointToLayer={(_, latlng) => feature.category === "Rumah" ? L.marker(latlng, {
-      icon: houseIcon,
-      title: `Rumah: ${feature.name}`,
-      keyboard: true,
-      riseOnHover: true,
-    }) : L.circleMarker(latlng, {
-      pane: "markerPane",
-      radius: feature.category === "Tiang" ? 5 : 7,
-      color, fillColor: color, fillOpacity: 0.85, weight: 2,
-    })}
-    onEachFeature={(_, layer) => {
-      layer.on("click", () => onSelect(feature))
-      if (showLabels) {
-        const label = document.createElement("span")
-        label.textContent = feature.name
-        layer.bindTooltip(label)
+function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels }: {
+  features: FeatureItem[]; category: Category; style: LayerStyle; zIndex: number
+  onSelect: MapViewProps["onSelect"]; showLabels?: boolean
+}) {
+  const map = useMap()
+  const group = useRef<L.FeatureGroup | null>(null)
+  const pane = layerPaneName(category)
+
+  // A stable pane per category controls vectors and point icons together.
+  useEffect(() => {
+    const element = map.getPane(pane) || map.createPane(pane)
+    element.style.zIndex = String(zIndex)
+  }, [map, pane, zIndex])
+
+  // Geometry changes rebuild this category's group. Styling, ordering, labels,
+  // basemap and visibility do not recreate the group or the Leaflet map.
+  useEffect(() => {
+    const collection = L.featureGroup()
+    for (const item of features) {
+      const layer = L.geoJSON(toGeoJSON(item), {
+        pane,
+        pointToLayer: (_, latlng) => category === "Rumah" || category === "Tiang"
+          ? L.marker(latlng, { pane, title: `${category}: ${item.name}`, keyboard: true, icon: L.divIcon({ className: "survey-house-marker", html: "" }) })
+          : L.circleMarker(latlng, { pane }),
+        onEachFeature: (_, featureLayer) => visitLeaves(featureLayer, leaf => {
+          names.set(leaf, item.name)
+          leaf.on("click", () => onSelect(item))
+        }),
+      })
+      collection.addLayer(layer)
+    }
+    group.current = collection
+    return () => { collection.remove(); collection.clearLayers(); group.current = null }
+  }, [features, category, pane, map, onSelect])
+
+  useEffect(() => {
+    if (!group.current) return
+    visitLeaves(group.current, leaf => {
+      if (leaf instanceof L.Marker) {
+        if (category === "Rumah" || category === "Tiang") leaf.setIcon(pointIcon(style, category))
+      } else if (leaf instanceof L.CircleMarker) {
+        leaf.setRadius(style.markerSize / 2)
+        leaf.setStyle({ color: style.color, fillColor: style.color, fillOpacity: 0.85, weight: 2 })
+      } else if (leaf instanceof L.Path) {
+        leaf.setStyle({ color: style.color, fillColor: style.color, weight: style.lineWidth, fillOpacity: style.fillOpacity })
       }
-    }}
-  />
+    })
+  }, [style, features, category, map, onSelect])
+
+  useEffect(() => {
+    if (!group.current) return
+    if (style.visible) group.current.addTo(map)
+    else group.current.remove()
+  }, [style.visible, features, category, map, onSelect])
+
+  useEffect(() => {
+    if (!group.current) return
+    visitLeaves(group.current, leaf => {
+      leaf.unbindTooltip()
+      if (showLabels) {
+        const text = document.createElement("span")
+        text.textContent = names.get(leaf) || ""
+        leaf.bindTooltip(text)
+      }
+    })
+  }, [showLabels, features, category, map, onSelect])
+  return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels }: MapViewProps) {
-  return <MapContainer center={[-6.9147, 107.6098]} zoom={14} zoomControl={false} className="h-full w-full">
-    <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+export default function MapView({ features, onSelect, onReady, showLabels, settings }: MapViewProps) {
+  const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
+  const base = baseMaps[settings.baseMap]
+  return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
+    <TileLayer key={settings.baseMap} attribution={base.attribution} url={base.url} maxNativeZoom={19} maxZoom={22} />
     <MapInitializer onReady={onReady} />
-    {features.map(feature => <SurveyLayer key={feature.id} feature={feature} onSelect={onSelect} showLabels={showLabels} />)}
+    {categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
   </MapContainer>
 }

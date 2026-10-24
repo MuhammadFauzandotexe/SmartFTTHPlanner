@@ -156,12 +156,14 @@
 .leaflet-container { font-family: inherit; }
 .leaflet-control-attribution { font-size: 9px; }
 
-.survey-house-marker {
+.survey-house-marker,
+.survey-pole-marker {
   background: transparent;
   border: 0;
 }
 
-.survey-house-marker__symbol {
+.survey-house-marker__symbol,
+.survey-pole-marker__symbol {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,6 +176,13 @@
   box-shadow: 0 1px 4px rgb(15 23 42 / 45%);
 }
 
+.survey-pole-marker__symbol {
+  border-width: 1px;
+  border-radius: 50%;
+}
+
+.survey-pole-marker:hover .survey-pole-marker__symbol,
+.survey-pole-marker:focus-visible .survey-pole-marker__symbol,
 .survey-house-marker:hover .survey-house-marker__symbol,
 .survey-house-marker:focus-visible .survey-house-marker__symbol {
   background: #1d4ed8;
