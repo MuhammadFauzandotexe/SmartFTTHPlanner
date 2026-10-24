@@ -26,7 +26,9 @@ export function parseCategory(name: string, geometry: Geometry): Category {
   if (n.includes("FAT")) return "FAT"
   if (n.includes("POLE") || n.includes("TIANG")) return "Tiang"
   if (n.includes("RUMAH") || n.includes("HOME") || n.includes("PELANGGAN")) return "Rumah"
-  if (geometry.type === "Point" && /^\d+$/.test(name.trim())) return "Rumah"
+  // House numbers may include a letter suffix, ranges, or an unknown endpoint.
+  // Require a digit so an isolated '?' or arbitrary text is not inferred as a house.
+  if (geometry.type === "Point" && /^(?=.*\d)(?:\d+[A-Z]?|\?)(?:\s*-\s*(?:\d+[A-Z]?|\?))*$/.test(n.trim())) return "Rumah"
   return "Belum dikategorikan"
 }
 

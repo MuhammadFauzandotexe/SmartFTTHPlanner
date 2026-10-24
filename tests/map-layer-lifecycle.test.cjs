@@ -24,6 +24,12 @@ function hooks() {
   let pending = []
   const react = {
     useMemo: fn => fn(),
+    useCallback: (fn, deps) => {
+      const index = cursor++
+      const previous = slots[index]
+      if (!previous || deps.some((dep, i) => !Object.is(dep, previous.deps[i]))) slots[index] = { deps, fn }
+      return slots[index].fn
+    },
     useRef: value => { const index = cursor++; return slots[index] ||= { current: value } },
     useState: initial => { const index = cursor++; const slot = slots[index] ||= { value: typeof initial === 'function' ? initial() : initial }; return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value }] },
     useEffect: (fn, deps) => {
@@ -197,7 +203,7 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     const { planFtth } = require('../lib/ftth-planning.ts')
     const surveyPoint = (id, category, longitude) => ({ id, name: id, category, file: 'test.kml', geometry: { type: 'Point', coordinates: [longitude, -6] }, props: {} })
     const input = [surveyPoint('h1', 'Rumah', 107), surveyPoint('h2', 'Rumah', 107.001), surveyPoint('pole', 'Tiang', 107)]
-    const plan = planFtth(input)
+    const plan = planFtth(input, 8, 1000)
     const original = JSON.stringify(plan)
     const selected = []
     const selectedHomes = []
@@ -237,7 +243,7 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     assert.equal(controls, 1)
     homes.remove() // Leaflet's native layer control toggles membership only.
     assert.equal(map.layers.size, 2)
-    const next = planFtth([...input, surveyPoint('h3', 'Rumah', 107.002)])
+    const next = planFtth([...input, surveyPoint('h3', 'Rumah', 107.002)], 8, 1000)
     props = { ...props, plan: next }
     harness.render(() => PlanningMapLayers(props))
     assert.equal(controls, 1)
@@ -261,10 +267,177 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     assert.equal(links.children[8].style.opacity, 0.55)
     assert.equal(links.children.length, 9) // Highlighting never rebuilds or duplicates overlays.
     assert.equal(controls, 1)
+    const limited = planFtth(input, 8, 100)
+    props = { ...props, plan: limited }
+    harness.render(() => PlanningMapLayers(props))
+    assert.equal(limited.unservedHomes.length, 1)
+    assert.equal(links.children.length, 1)
+    assert.equal(homes.children.filter(layer => layer.options.color === '#dc2626').length, 1)
     harness.cleanup()
     assert.equal(map.layers.size, 0)
     assert.equal(removedControls, 1)
     assert.equal(homes.children.length, 0)
     assert.equal(links.children.length, 0)
   } finally { global.document = oldDocument }
+})
+
+
+test('application log appends unique entries without resetting history or callback identity', () => {
+  const applicationLog = require('../lib/application-log.ts')
+  const harness = hooks()
+  const { useApplicationLog } = load('../hooks/use-application-log.ts', { react: harness.react, '@/lib/application-log': applicationLog })
+  let result = harness.render(useApplicationLog)
+  const add = result.addLogs
+  const initialCount = result.entries.length
+  add([{ level: 'success', source: 'Impor', title: 'File loaded', details: [{ label: 'File', value: 'survey.kmz' }] }])
+  result = harness.render(useApplicationLog)
+  assert.equal(result.entries.length, initialCount + 1)
+  assert.equal(result.addLogs, add)
+  result.addLogs([{ level: 'error', source: 'Geometri', title: 'Invalid coordinate', details: [] }])
+  result = harness.render(useApplicationLog)
+  assert.equal(result.entries.length, initialCount + 2)
+  assert.equal(new Set(result.entries.map(entry => entry.id)).size, result.entries.length)
+  assert.equal(result.entries.at(-2).details[0].value, 'survey.kmz')
+  assert(!Number.isNaN(Date.parse(result.entries.at(-1).createdAt)))
+})
+
+test('log drawer stays collapsed on new messages and opens details only on user request', () => {
+  const applicationLog = require('../lib/application-log.ts')
+  const harness = hooks()
+  const { ApplicationLog } = load('../components/application-log.tsx', { react: harness.react, '@/lib/application-log': applicationLog })
+  let entries = applicationLog.initialLogMessages().map((entry, index) => ({ ...entry, id: String(index), createdAt: '2026-01-01T00:00:00.000Z' }))
+  let tree = harness.render(() => ApplicationLog({ entries }))
+  assert.equal(tree.props.children[0].props['aria-expanded'], false)
+  assert.equal(tree.props.children[2], false)
+  entries = [...entries, { level: 'warning', source: 'Metadata', title: 'Schema missing', details: [{ label: 'Schema', value: '#missing' }], id: 'new', createdAt: '2026-01-01T00:00:00.000Z' }]
+  tree = harness.render(() => ApplicationLog({ entries }))
+  assert.equal(tree.props.children[0].props['aria-expanded'], false)
+  assert.equal(tree.props.children[2], false)
+  tree.props.children[0].props.onClick()
+  tree = harness.render(() => ApplicationLog({ entries }))
+  const body = tree.props.children[2]
+  assert.equal(body.props.id, 'application-log-body')
+  const rows = body.props.children.props.children
+  assert.equal(rows.length, entries.length)
+  assert(rows.every(row => row.props.children.type === 'details' && !row.props.children.props.open))
+  const originalDocument = global.document
+  let focused = false
+  global.document = { querySelector: () => ({ focus: () => { focused = true } }) }
+  try { body.props.onKeyDown({ key: 'Escape' }) } finally { global.document = originalDocument }
+  tree = harness.render(() => ApplicationLog({ entries }))
+  assert.equal(tree.props.children[0].props['aria-expanded'], false)
+  assert(focused)
+  assert.equal(entries.length, 3)
+})
+
+
+test('FAT configuration is applied only after manual planning and dropdown navigation preserves results', async () => {
+  const planning = require('../lib/ftth-planning.ts')
+  const applicationLog = require('../lib/application-log.ts')
+  const harness = hooks()
+  const recordedLogs = []
+  const runs = []
+  const data = [...Array.from({ length: 51 }, (_, index) => ({ id: `h${index}`, name: `h${index}`, category: 'Rumah', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107 + index * 0.00001], geometry: { type: 'Point', coordinates: [107 + index * 0.00001, -6] }, props: {} })), { id: 'p', name: 'pole', category: 'Tiang', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107], geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }]
+  const addLogs = logs => recordedLogs.push(...logs)
+  const layerSettings = preferences.defaultLayerSettings()
+  const overrides = {
+    react: harness.react,
+    'next/dynamic': () => 'MapView',
+    '@/lib/import-survey': { importSurveyFile: async () => ({ features: data, warnings: [], metadataWarnings: [], geometryWarnings: [] }), ImportSurveyError: class extends Error {} },
+    '@/lib/survey': survey,
+    '@/lib/application-log': applicationLog,
+    '@/lib/ftth-planning': { ...planning, planFtth: (features, capacity, limit) => { runs.push(capacity); return planning.planFtth(features, capacity, limit) } },
+    '@/lib/layer-settings': preferences,
+    '@/hooks/use-application-log': { useApplicationLog: () => ({ entries: [], addLogs }) },
+    '@/hooks/use-layer-settings': { useLayerSettings: () => ({ settings: layerSettings, setSettings() {}, ready: true, storageError: false }) },
+    '@/components/application-log': { ApplicationLog: 'ApplicationLog' },
+    '@/components/control-section': { ControlSection: 'ControlSection' },
+    '@/components/planning-panel': { PlanningPanel: 'PlanningPanel' },
+    '@/components/layer-settings': { LayerSettingsPanel: 'LayerSettingsPanel' },
+    '@/components/ui/button': { Button: 'button' },
+    '@/components/ui/badge': { Badge: 'span' },
+    '@/components/ui/input': { Input: 'input' },
+    '@/components/ui/separator': { Separator: 'hr' },
+  }
+  const { default: Viewer } = load('../components/ftth-viewer.tsx', overrides)
+  function find(node, predicate) {
+    if (!node || typeof node !== 'object') return null
+    if (Array.isArray(node)) { for (const item of node) { const found = find(item, predicate); if (found) return found } return null }
+    if (predicate(node)) return node
+    return find(node.props?.children, predicate)
+  }
+  const config = tree => find(tree, node => node.props?.id === 'fat-port-count')
+  const panel = tree => find(tree, node => node.type === 'PlanningPanel')
+  const section = (tree, title) => find(tree, node => node.type === 'ControlSection' && node.props.title === title)
+  let tree = harness.render(Viewer)
+  assert.equal(config(tree).props.value, 8)
+  const options = config(tree).props.children
+  assert.equal(options.length, 25)
+  assert.equal(options[0].props.value, 1)
+  assert.equal(options.at(-1).props.value, 25)
+  assert.equal(section(tree, 'Data Impor').props.open, false)
+  assert.equal(section(tree, 'Layer & Kategori').props.open, false)
+  config(tree).props.onChange({ target: { value: '25' } })
+  tree = harness.render(Viewer)
+  assert.equal(config(tree).props.value, 25)
+  assert.deepEqual(runs, [])
+  const importer = find(tree, node => node.type === 'input' && node.props.type === 'file')
+  await importer.props.onChange({ target: { files: [{ name: 'test.kml' }] } })
+  tree = harness.render(Viewer)
+  assert.equal(panel(tree).props.plan, null)
+  assert.deepEqual(runs, [])
+  panel(tree).props.onRun()
+  tree = harness.render(Viewer)
+  assert.deepEqual(runs, [25])
+  assert.equal(panel(tree).props.plan.fatPorts, 25)
+  assert.equal(panel(tree).props.plan.groups.length, 3)
+  assert.equal(panel(tree).props.resultsOpen, true)
+  const firstPlan = panel(tree).props.plan
+  section(tree, 'Perencanaan FTTH').props.onOpenChange(false)
+  tree = harness.render(Viewer)
+  assert.equal(section(tree, 'Perencanaan FTTH').props.open, false)
+  panel(tree).props.onSelectGroup('G001')
+  tree = harness.render(Viewer)
+  assert.equal(section(tree, 'Perencanaan FTTH').props.open, true)
+  assert.equal(panel(tree).props.selectedGroupId, 'G001')
+  section(tree, 'Layer & Kategori').props.onOpenChange(true)
+  section(tree, 'Data Impor').props.onOpenChange(true)
+  tree = harness.render(Viewer)
+  assert.equal(panel(tree).props.plan, firstPlan)
+  assert.deepEqual(runs, [25])
+  config(tree).props.onChange({ target: { value: '16' } })
+  tree = harness.render(Viewer)
+  assert.equal(panel(tree).props.plan, null)
+  assert.equal(panel(tree).props.resultsOpen, false)
+  assert.deepEqual(runs, [25])
+  panel(tree).props.onRun()
+  tree = harness.render(Viewer)
+  assert.deepEqual(runs, [25, 16])
+  assert.equal(panel(tree).props.plan.fatPorts, 16)
+  assert.equal(panel(tree).props.plan.groups.length, 4)
+  assert.equal(firstPlan.fatPorts, 25)
+  assert(recordedLogs.some(entry => entry.source === 'Planning Configuration'))
+  const dropInput = find(tree, node => node.props?.id === 'max-drop-length')
+  dropInput.props.onChange({ target: { value: '10' } })
+  tree = harness.render(Viewer)
+  assert.equal(panel(tree).props.plan, null)
+  panel(tree).props.onRun()
+  tree = harness.render(Viewer)
+  assert.equal(panel(tree).props.plan.maxDropLengthMeters, 10)
+  assert(panel(tree).props.plan.unservedHomes.length > 0)
+})
+
+test('collapsible control sections report user toggles without duplicate state updates', () => {
+  const { ControlSection } = load('../components/control-section.tsx')
+  const changes = []
+  let tree = ControlSection({ title: 'Layer & Kategori', caption: '6 kategori', open: false, onOpenChange: value => changes.push(value), children: 'Content' })
+  assert.equal(tree.type, 'details')
+  assert.equal(tree.props.open, false)
+  tree.props.onToggle({ currentTarget: { open: true } })
+  assert.deepEqual(changes, [true])
+  tree = ControlSection({ title: 'Layer & Kategori', open: true, onOpenChange: value => changes.push(value), children: 'Content' })
+  tree.props.onToggle({ currentTarget: { open: true } })
+  assert.deepEqual(changes, [true])
+  tree.props.onToggle({ currentTarget: { open: false } })
+  assert.deepEqual(changes, [true, false])
 })

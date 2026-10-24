@@ -1,7 +1,19 @@
 import { distance, point } from "@turf/turf"
 import { validGeometry, type FeatureItem } from "./survey"
 
-export const MAX_HOMES_PER_GROUP = 8
+export const DEFAULT_FAT_PORTS = 8
+export const DEFAULT_MAX_DROP_LENGTH_METERS = 100
+export function validateMaxDropLengthMeters(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) throw new RangeError("Maksimum panjang drop harus angka positif dan terbatas dalam meter.")
+  return value
+}
+export const MAX_FAT_PORTS = 25
+export function validateFatPorts(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_FAT_PORTS) {
+    throw new RangeError(`Jumlah port FAT harus bilangan bulat antara 1 dan ${MAX_FAT_PORTS}.`)
+  }
+  return value
+}
 export type PlanningPoint = {
   id: string
   name: string
@@ -18,6 +30,10 @@ export type FatCandidate = {
 export type HomeGroup = { id: string; color: string; homes: PlanningPoint[]; candidate: FatCandidate | null }
 export type PlanningIssue = { id: string; name: string; reason: string }
 export type FtthPlan = {
+  fatPorts: number
+  maxDropLengthMeters: number
+  distanceMethod: "straight-line"
+  unservedHomes: { home: PlanningPoint; reason: string; fatId?: string; pole?: PlanningPoint; distanceMeters?: number }[]
   groups: HomeGroup[]
   homeCount: number
   poleCount: number
@@ -35,17 +51,18 @@ export function planningDistance(a: PlanningPoint, b: PlanningPoint): number {
   return distance(point(a.coordinates), point(b.coordinates), { units: "meters" })
 }
 
-/** A geographically ordered seed plus up to seven nearest unassigned homes.
+/** A geographically ordered seed plus nearest unassigned homes up to FAT capacity.
  * This is an initial greedy grouping, not a global optimum or cable routing.
  */
-export function groupHomes(homes: readonly PlanningPoint[]): PlanningPoint[][] {
+export function groupHomes(homes: readonly PlanningPoint[], fatPorts = DEFAULT_FAT_PORTS): PlanningPoint[][] {
+  validateFatPorts(fatPorts)
   let remaining = [...homes].sort(comparePoint)
   const groups: PlanningPoint[][] = []
   while (remaining.length) {
     const seed = remaining[0]
     const nearest = remaining.slice(1).map(home => ({ home, meters: planningDistance(seed, home) }))
       .sort((a, b) => a.meters - b.meters || comparePoint(a.home, b.home))
-      .slice(0, MAX_HOMES_PER_GROUP - 1).map(entry => entry.home)
+      .slice(0, fatPorts - 1).map(entry => entry.home)
     const group = [seed, ...nearest]
     const assigned = new Set(group.map(home => home.id))
     groups.push(group)
@@ -94,19 +111,34 @@ export function extractPlanningInputs(features: readonly FeatureItem[]) {
   return { homes, poles, issues }
 }
 
-export function planFtth(features: readonly FeatureItem[]): FtthPlan {
+export function planFtth(features: readonly FeatureItem[], fatPorts = DEFAULT_FAT_PORTS, maxDropLengthMeters = DEFAULT_MAX_DROP_LENGTH_METERS): FtthPlan {
+  validateMaxDropLengthMeters(maxDropLengthMeters)
+  validateFatPorts(fatPorts)
   const { homes, poles, issues } = extractPlanningInputs(features)
   const warnings: string[] = []
   if (!homes.length) warnings.push("Tidak ada titik Rumah valid untuk dikelompokkan.")
-  if (!poles.length) warnings.push("Tidak ada titik Tiang valid. Kelompok rumah tetap dibuat tanpa kandidat FAT.")
+  if (!poles.length) warnings.push("Tidak ada titik Tiang valid. Rumah ditandai belum terlayani.")
   if (issues.length) warnings.push(`${issues.length} objek Rumah/Tiang dilewati; periksa rincian data tidak digunakan.`)
-  const groups = groupHomes(homes).map((members, index): HomeGroup => {
+  const unservedHomes: FtthPlan["unservedHomes"] = []
+  const groups = groupHomes(homes, fatPorts).map((members, index): HomeGroup => {
     const id = `G${String(index + 1).padStart(3, "0")}`
     const candidate = selectFatPole(members, poles)
+    const served = members.filter(home => {
+      const checked = candidate?.connections.find(connection => connection.homeId === home.id)
+      if (checked && checked.distanceMeters <= maxDropLengthMeters) return true
+      unservedHomes.push({ home, reason: candidate ? "Melebihi batas drop pada FAT kelompok yang dievaluasi." : "Tidak ada kandidat FAT: titik Tiang valid tidak tersedia.",
+        ...(candidate && checked ? { fatId: `FAT-${id}`, pole: candidate.pole, distanceMeters: checked.distanceMeters } : {}) })
+      return false
+    })
+    if (candidate) {
+      const ids = new Set(served.map(home => home.id))
+      candidate.connections = candidate.connections.filter(connection => ids.has(connection.homeId))
+      candidate.totalDistanceMeters = candidate.connections.reduce((sum, connection) => sum + connection.distanceMeters, 0)
+    }
     return {
-      id, color: `hsl(${Math.round(index * 137.508) % 360}, 75%, 38%)`, homes: members,
+      id, color: `hsl(${Math.round(index * 137.508) % 360}, 75%, 38%)`, homes: served,
       candidate: candidate ? { id: `FAT-${id}`, ...candidate } : null,
     }
-  })
-  return { groups, homeCount: homes.length, poleCount: poles.length, issues, warnings }
+  }).filter(group => group.homes.length > 0)
+  return { fatPorts, maxDropLengthMeters, distanceMethod: "straight-line", unservedHomes, groups, homeCount: homes.length, poleCount: poles.length, issues, warnings }
 }

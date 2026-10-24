@@ -110,6 +110,12 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
         byPole.set(group.candidate.pole.id, poleGroups)
       }
     }
+    for (const item of plan.unservedHomes) {
+      const marker = L.circleMarker(latLng(item.home), {
+        pane: "planning-homes", radius: 14, color: "#dc2626", fillColor: "#dc2626", fillOpacity: 0.15, weight: 3, dashArray: "3 3",
+      }).bindTooltip(text(`Belum terlayani · ${item.home.name} · ${item.reason}${item.fatId ? ` ${item.fatId}: estimasi jarak lurus ${item.distanceMeters?.toFixed(1)} m; batas ${plan.maxDropLengthMeters} m.` : ""}`)).on("click", () => onSelectHome(item.home.id))
+      layers.homes.addLayer(marker)
+    }
     // Shared poles use one map marker with a selector for every associated FAT.
     for (const groups of byPole.values()) {
       const pole = groups[0].candidate!.pole
@@ -127,7 +133,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
         const button = document.createElement("button")
         button.type = "button"
         button.className = "planning-fat-choice"
-        button.textContent = `${group.candidate!.id} · ${group.id} · ${group.homes.length} rumah`
+        button.textContent = `${group.candidate!.id} · ${group.id} · ${group.homes.length}/${plan.fatPorts} port`
         button.addEventListener("click", () => { onSelectGroup(group.id); marker.closePopup() })
         popup.appendChild(button)
       }

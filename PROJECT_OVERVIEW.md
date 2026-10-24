@@ -6,7 +6,7 @@ Dokumen ini memisahkan kondisi kode saat ini dari kebutuhan pengembangan. Dasar 
 
 Smart FTTH Planner adalah aplikasi pemetaan dan perencanaan jaringan Fiber to the Home (FTTH). Data awal berasal dari survei lapangan berupa koordinat tiang dan rumah pelanggan dalam KML/KMZ.
 
-Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, kondisi awal kosong, impor KML/KMZ, dan ekspor GeoJSON yang mempertahankan geometri. Pengelompokan awal rumah (maksimal delapan anggota) dan kandidat FAT berdasarkan jarak geografis sudah tersedia. Routing jaringan, penempatan perangkat berdasarkan jalur fisik, link budget, dan BoQ masih rencana pengembangan.
+Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, kondisi awal kosong, impor KML/KMZ, dan ekspor GeoJSON yang mempertahankan geometri. Pengelompokan awal rumah (sesuai port FAT: default 8, maksimum 25 anggota) dan kandidat FAT berdasarkan jarak geografis sudah tersedia. Routing jaringan, penempatan perangkat berdasarkan jalur fisik, link budget, dan BoQ masih rencana pengembangan.
 
 Prinsip pengembangan:
 
@@ -28,7 +28,7 @@ Calon pengguna adalah petugas survei, perencana jaringan, dan pemeriksa hasil pe
 Alur yang sudah didukung secara terbatas:
 
 1. Buka halaman utama; aplikasi menampilkan peta tanpa objek survei dan petunjuk impor, bukan otomatis membaca file survei di root.
-2. Pilih **Impor Data** untuk memilih satu atau beberapa file. Arsip KMZ diekstrak dan seluruh KML di dalamnya dibaca; hasil dan peringatan ditampilkan pada panel.
+2. Pilih **Impor Data** untuk memilih satu atau beberapa file. Arsip KMZ diekstrak dan seluruh KML di dalamnya dibaca; hasil dan peringatan dicatat pada Log aplikasi di bawah peta.
 3. Cari berdasarkan nama atau ID, lihat titik, garis, dan poligon pada peta, dan klik objek untuk memeriksa kategori, koordinat, serta sumber file.
 4. Pilih rumah untuk melihat tiang terdekat berdasarkan jarak garis lurus.
 5. Gunakan zoom dan **Fit ke Data**, lalu ekspor fitur yang lolos pencarian menjadi GeoJSON dengan geometri dan properti aslinya.
@@ -56,7 +56,7 @@ Versi berikut adalah deklarasi `package.json`; awalan `^` merupakan rentang vers
 | Tailwind CSS / plugin PostCSS | `^4.3.3` / `^4.3.3` | Styling; PostCSS `^8.5` sebagai alat build |
 | `tw-animate-css` | `^1.4.0` | Stylesheet animasi diimpor |
 | `lucide-react` | `^1.16.0` | Ikon antarmuka |
-| `sonner` | `^2.0.8` | Toast sukses/gagal impor dan ekspor; `<Toaster />` terpasang |
+| `sonner` | `^2.0.8` | Dependency tersedia; pesan viewer kini menggunakan Log aplikasi, bukan toast |
 | `class-variance-authority` | `^0.7.1` | Variasi komponen UI |
 | `clsx`, `tailwind-merge`, `cn` | `^2.1.1`, `^3.3.1`, `^0.5.0` | Penggabungan class CSS |
 | `@vercel/analytics` | `1.6.1` | Komponen Analytics dirender pada mode produksi |
@@ -79,7 +79,9 @@ components/
   ftth-viewer.tsx           State, impor, pencarian, ekspor, panel
   map-view.tsx              Peta Leaflet, basemap, pane kategori dan pembaruan layer
   layer-settings.tsx        Panel visibility, styling, urutan dan basemap
-  planning-panel.tsx        Tombol perhitungan, daftar kelompok dan detail FAT
+  planning-panel.tsx        Tombol perhitungan, hasil yang dapat ditutup dan detail FAT
+  control-section.tsx       Bagian navigasi panel berbasis details/summary native
+  application-log.tsx       Drawer log bawah, penghitung status dan detail pesan
   planning-map-layers.tsx   Overlay dan kontrol layer perencanaan Leaflet
   ui/                      Button, Badge, Input, Separator
 lib/
@@ -87,13 +89,16 @@ lib/
   survey.ts                Model data, kategori, validasi dan ekspor geometri
   layer-settings.ts        Preferensi awal, validasi, urutan dan penyedia tile
   ftth-planning.ts         Validasi input, grouping greedy, skor kandidat FAT
+  application-log.ts        Model, panduan dan pembentukan pesan log terstruktur
   import-survey.ts          Pembaca KML/KMZ dan laporan impor
   kml-metadata.ts           Pembaca SchemaData, resolusi schema lokal, peringatan metadata
 hooks/
   use-layer-settings.ts    Pemulihan dan penyimpanan preferensi localStorage
+  use-application-log.ts   Riwayat log dalam state React, ID unik dan batas retensi
 tests/
   layer-settings.test.cjs   Uji validasi, urutan dan geometri campuran
   ftth-planning.test.cjs    Uji grouping, skor FAT, kasus kosong/invalid, dan KMZ contoh
+  application-log.test.cjs Uji pesan terstruktur, pengelompokan, penghitung dan retensi
   map-layer-lifecycle.test.cjs Uji kontrak renderer, overlay rencana dan persistence dengan mock
   import-survey.test.cjs    Uji parser, arsip, geometri, dan file contoh
 Data-Mentah.kmz             Berkas survei di root; tidak dimuat otomatis
@@ -125,7 +130,7 @@ Arsip rusak/terenkripsi, arsip tanpa KML, dan file tanpa fitur valid menghasilka
 
 Referensi schema hanya dicocokkan dengan definisi `Schema` di dokumen yang sama atau KML lain yang sudah ada di dalam KMZ, termasuk jalur relatif. Schema eksternal tidak diambil otomatis. Jika definisi schema/field/tipe tidak ditemukan, nilainya tetap string apa adanya, termasuk nol di depan, spasi, dan string kosong. Tipe hanya diterapkan bila field memiliki definisi eksplisit pada schema yang dirujuk; tipe tidak dikenal atau nilai bertipe tidak valid tetap string.
 
-Schema yang hilang tidak menggagalkan fitur dengan geometri valid. Panel **Peringatan metadata** mengelompokkan peringatan per sumber KML dan `schemaUrl`, dengan daftar nama serta ID asli fitur; bila ID asli tidak ada, digunakan ID internal. Tidak ada popup per fitur. **Masalah geometri** ditampilkan terpisah dan hanya menjelaskan fitur yang tidak dapat dimuat karena geometrinya. Peringatan tetap tersedia bila seluruh geometri gagal.
+Schema yang hilang tidak menggagalkan fitur dengan geometri valid. Log **Metadata** mengelompokkan peringatan per sumber KML dan `schemaUrl`, dengan daftar nama serta ID asli fitur pada detail yang dapat dibuka; bila ID asli tidak ada, digunakan ID internal. Tidak ada popup per fitur. Log **Geometri** dengan tingkat error ditampilkan terpisah dan hanya menjelaskan fitur yang tidak dapat dimuat karena geometrinya. Peringatan tetap tersedia bila seluruh geometri gagal.
 
 Ekspor memprioritaskan nama/nilai atribut asli apabila bertabrakan dengan nama properti tambahan viewer seperti `id`, `name`, atau `source`. ID internal fitur tetap tersedia pada anggota `id` GeoJSON di luar `properties`.
 
@@ -150,7 +155,7 @@ type FeatureItem = {
 
 Geometri GeoJSON memakai **longitude, latitude**; altitude dipertahankan jika tersedia. `coords` hanya titik pertama untuk panel detail, bukan pengganti geometri penuh. Label panel membedakan “Latitude, Longitude” untuk Point dan “Titik awal (Lat, Lon)” untuk bentuk lain. ID KML asli disimpan sebagai `props.originalId` bila ada dan tidak berbenturan dengan atribut asli bernama sama; ID internal bukan identitas survei permanen.
 
-Garis dan MultiLineString dikategorikan sebagai “Jalur kabel”. Untuk bentuk lain, nama diperiksa untuk FDT, FAT, POLE/TIANG, dan RUMAH/HOME/PELANGGAN. Khusus geometri Point, nama yang hanya berisi angka (misalnya `29` atau `001`, dengan spasi di awal/akhir diabaikan) juga dikategorikan sebagai “Rumah”; nama dan koordinat asli tetap dipertahankan. Sisanya “Belum dikategorikan”. Editor kategori belum tersedia. Impor ulang menambahkan objek dengan ID internal baru; belum ada deduplikasi otomatis.
+Garis dan MultiLineString dikategorikan sebagai “Jalur kabel”. Untuk bentuk lain, nama diperiksa untuk FDT, FAT, POLE/TIANG, dan RUMAH/HOME/PELANGGAN. Khusus geometri Point, nomor rumah berupa angka (`29`, `001`), angka dengan sufiks huruf (`41A`, `41a`), rentang (`19-20`), atau nomor dengan salah satu ujung tidak diketahui (`?-5`, `4-?`) juga dikategorikan sebagai “Rumah”. Spasi di awal/akhir dan sekitar tanda hubung diabaikan saat pencocokan; setidaknya satu digit harus ada. Nama asli dan koordinat tetap dipertahankan. Sisanya “Belum dikategorikan”. Editor kategori belum tersedia. Impor ulang menambahkan objek dengan ID internal baru; belum ada deduplikasi otomatis.
 
 ### Tampilan dan ekspor
 
@@ -168,19 +173,29 @@ Pengaturan tersedia untuk enam kategori yang sudah ada: Tiang, Rumah, FAT, FDT, 
 
 Instance MapContainer dipertahankan. Pergantian basemap hanya mengganti TileLayer, sedangkan visibility menambah/melepas group kategori yang sama. Styling memakai setStyle, setRadius dan setIcon; label diperbarui tanpa membangun ulang geometri. Data dan hasil ekspor tetap mengikuti pencarian seperti sebelumnya; visibility hanya mengubah tampilan peta dan jumlah fitur terlihat.
 
-Preferensi disimpan dengan key `smart-ftth-planner.layer-settings.v1` setelah proses pemulihan selesai agar nilai awal tidak menimpa preferensi tersimpan. Data tersimpan divalidasi: kategori tidak dikenal dibuang, urutan dideduplikasi, nilai numerik dibatasi dan warna harus hex. Jika localStorage tidak tersedia, kontrol tetap bekerja selama sesi dan panel memberi status penyimpanan. Tombol reset mengembalikan preferensi awal. Pengaturan tidak menyimpan data survei, koordinat tampilan atau tingkat zoom.
+Preferensi disimpan dengan key `smart-ftth-planner.layer-settings.v1` setelah proses pemulihan selesai agar nilai awal tidak menimpa preferensi tersimpan. Data tersimpan divalidasi: kategori tidak dikenal dibuang, urutan dideduplikasi, nilai numerik dibatasi dan warna harus hex. Jika localStorage tidak tersedia, kontrol tetap bekerja selama sesi dan peringatan dicatat pada log Preferensi. Tombol reset mengembalikan preferensi awal. Pengaturan tidak menyimpan data survei, koordinat tampilan atau tingkat zoom.
 
 Peta jalan menggunakan endpoint HTTPS OpenStreetMap dengan atribusi yang tetap terlihat dan caching bawaan browser, tanpa unduhan offline/prefetch. Citra satelit memakai layanan publik Esri World Imagery dengan kredit sumber layanan dan tautan atribusi; ketentuan penyedia dapat dibuka dari panel. Referensi: [OSM Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/), [World Imagery](https://goto.arcgisonline.com/maps/World_Imagery), dan [Esri Service Terms](https://www.esri.com/en-us/legal/terms/web-site-service). Resolusi citra bergantung lokasi; di atas zoom native 19, tile diperbesar hingga zoom 22.
 
+### Planning Configuration dan navigasi panel kontrol
+
+Panel kontrol dibagi menjadi bagian yang dapat dibuka/tutup secara independen: **Data Impor**, **Planning Configuration**, **Perencanaan FTTH**, **Layer & Kategori**, dan **Tampilan & Alat**. Pencarian tetap langsung tersedia. Data Impor memuat ringkasan, daftar nama file/jumlah fitur, serta akses impor/ekspor. Layer & Kategori mempertahankan kontrol mata setiap kategori; Tampilan & Alat mengelompokkan label, akses Layer Settings dan kontrol alat yang sudah ada. Pesan proses tetap berada di Log aplikasi.
+
+Secara awal, Data Impor, Layer & Kategori, serta Tampilan & Alat tertutup agar ruang panel tidak cepat habis. Ringkasan pada judul bagian tetap menunjukkan jumlah file, visibility kategori atau jumlah port. Bagian Perencanaan FTTH mempunyai dropdown **Hasil Perencanaan** tersendiri. Hasil dibuka setelah perhitungan manual; memilih ikon kelompok membuka bagian terkait dan menggulir ke detail yang dipilih. Membuka/tutup navigasi tidak mengubah data, hasil hitungan atau visibility layer.
+
+**Planning Configuration → Jumlah port FAT** menyediakan pilihan bilangan bulat **1–25**, dengan default **8**. Pada MVP, setiap rumah dianggap menggunakan satu port, sehingga satu kelompok mempunyai maksimal rumah sebanyak kapasitas yang dipilih. `groupHomes` dan `planFtth` menerima parameter kapasitas opsional (default 8) dan menolak nilai tidak valid melalui `validateFatPorts` sebelum melakukan pengelompokan.
+
+Mengubah port membatalkan hasil/visualisasi lama dan mencatat perubahan di log. Penghitungan baru hanya terjadi ketika tombol perencanaan diklik, termasuk setelah impor. Kapasitas yang digunakan disimpan pada hasil agar jumlah port di detail kelompok, popup FAT dan log selalu sesuai perhitungan tersebut. Konfigurasi ini berlaku selama sesi dan kembali ke default 8 setelah muat ulang; pengaturan visual layer tetap menggunakan persistence yang sudah ada.
+
 ### Perencanaan awal FTTH (MVP)
 
-Impor hanya memuat dan menampilkan data survei; tidak menjalankan pengelompokan atau estimasi FAT. Setelah impor, status menunjukkan perencanaan belum dijalankan. Klik **Mulai pengelompokan & estimasi FAT** pada panel kontrol untuk memulai secara manual. Tombol nonaktif selama impor atau jika data belum tersedia. Hanya fitur kategori Rumah dan Tiang dengan geometri Point tunggal serta koordinat valid yang dipakai. Perhitungan memakai koordinat GeoJSON asli, bukan koordinat tampilan panel. Geometri tidak valid, bentuk non-Point pada dua kategori ini, dan ID internal duplikat dilaporkan sebagai data yang tidak digunakan. ID sumber seperti HPTAR_ID/POLE_ID dipertahankan untuk informasi pengguna; keanggotaan memakai ID internal.
+Impor hanya memuat dan menampilkan data survei; tidak menjalankan pengelompokan atau estimasi FAT. Setelah impor, log Info menunjukkan perencanaan belum dijalankan. Klik **Mulai pengelompokan & estimasi FAT** pada panel kontrol untuk memulai secara manual. Tombol nonaktif selama impor atau jika data belum tersedia. Hanya fitur kategori Rumah dan Tiang dengan geometri Point tunggal serta koordinat valid yang dipakai. Perhitungan memakai koordinat GeoJSON asli, bukan koordinat tampilan panel. Geometri tidak valid, bentuk non-Point pada dua kategori ini, dan ID internal duplikat dilaporkan sebagai data yang tidak digunakan. ID sumber seperti HPTAR_ID/POLE_ID dipertahankan untuk informasi pengguna; keanggotaan memakai ID internal.
 
-Algoritma `groupHomes` mengurutkan rumah secara geografis (longitude, latitude, lalu nama/ID), memilih rumah pertama yang belum dipakai sebagai seed, dan mengambil maksimal tujuh rumah terdekat ke seed berdasarkan jarak Turf dalam meter. Proses diulang hingga semua rumah valid mendapat satu kelompok. Ini adalah greedy sederhana, bukan optimasi global; tidak ada ambang jarak atau asumsi koridor kabel.
+Algoritma `groupHomes` mengurutkan rumah secara geografis (longitude, latitude, lalu nama/ID), memilih rumah pertama yang belum dipakai sebagai seed, dan mengambil rumah terdekat ke seed hingga kapasitas port FAT yang dipilih terpenuhi (default tujuh tetangga ditambah satu seed). Jarak dihitung melalui Turf dalam meter. Proses diulang hingga semua rumah valid mendapat satu kelompok. Ini adalah greedy sederhana, bukan optimasi global; tidak ada ambang jarak atau asumsi koridor kabel.
 
 `selectFatPole` membandingkan **seluruh tiang valid** untuk setiap kelompok. Skornya adalah jumlah jarak geografis tiang ke seluruh rumah anggota; kandidat dengan jumlah terkecil dipilih, tanpa pendekatan centroid. Jika nilai sama, urutan koordinat, nama dan ID dipakai secara konsisten. Tiang tidak memiliki pembatas pemasangan pada MVP dan boleh dipilih oleh beberapa kelompok. Setiap kelompok tetap mempunyai ID kandidat FAT sendiri (`FAT-G001`, dan seterusnya).
 
-Hasil `FtthPlan` terpisah dari data survei: kelompok berisi ID (`G001`, dan seterusnya), warna, snapshot rumah, kandidat FAT/tiang, jumlah jarak dan hubungan layanan per rumah. Data sumber tidak diedit dan kandidat tidak ditambahkan sebagai objek FAT survei. Ekspor GeoJSON yang sudah ada tetap mengekspor data survei, bukan hasil perencanaan.
+Hasil `FtthPlan` menyimpan snapshot `fatPorts` yang digunakan saat dihitung dan terpisah dari data survei: kelompok berisi ID (`G001`, dan seterusnya), warna, snapshot rumah, kandidat FAT/tiang, jumlah jarak dan hubungan layanan per rumah. Data sumber tidak diedit dan kandidat tidak ditambahkan sebagai objek FAT survei. Ekspor GeoJSON yang sudah ada tetap mengekspor data survei, bukan hasil perencanaan.
 
 Visualisasi terdiri dari tiga overlay mandiri:
 
@@ -192,7 +207,19 @@ Klik rumah atau lingkaran perencanaannya untuk membuka informasi objek survei as
 
 **Hitung ulang kelompok & FAT** mengganti hasil lama dan isi overlay, tanpa menumpuk marker/garis atau kontrol baru; visibility overlay yang dipilih tetap dipertahankan selama kontrol masih terpasang. Memulai impor baru membatalkan hasil lama agar tidak tertukar dengan data yang sedang dimuat; jalankan kembali perhitungan. Hasil dan pilihan layer perencanaan hanya selama sesi, tidak disimpan dalam localStorage.
 
-Bila tidak ada rumah valid, panel menjelaskan bahwa tidak ada kelompok yang bisa dibuat. Bila tidak ada tiang valid, rumah tetap dikelompokkan dengan kandidat FAT `null`, tanpa marker FAT/garis layanan. Batas panjang drop, kelayakan pemasangan, kapasitas perangkat fisik, dan cadangan port belum diperiksa. Batas delapan rumah adalah aturan kelompok MVP, bukan pernyataan spesifikasi perangkat yang sudah disepakati.
+Bila tidak ada rumah valid, log menjelaskan bahwa tidak ada kelompok yang bisa dibuat. Bila tidak ada tiang valid, rumah tetap dikelompokkan dengan kandidat FAT `null`, tanpa marker FAT/garis layanan. Batas panjang drop, kelayakan pemasangan, kapasitas perangkat fisik, dan cadangan port belum diperiksa. Kapasitas port FAT yang dikonfigurasi menjadi batas anggota kelompok, dengan asumsi satu rumah memakai satu port. Parameter ini bukan verifikasi spesifikasi perangkat fisik atau cadangan port.
+
+### Log aplikasi
+
+Panel kontrol berisi aksi, pengaturan, ringkasan survei dan daftar/detail objek atau kelompok. Panduan panjang, status impor/perencanaan, peringatan schema, masalah geometri dan kegagalan penyimpanan dipindahkan ke **Log aplikasi** di bagian bawah, terpisah dari daftar fitur.
+
+Log tertutup saat halaman dibuka. Bar log tetap terlihat dengan jumlah total pesan dan ikon penghitung **Success**, **Warning**, **Error**, serta **Info**. Klik bar untuk menampilkan/menyembunyikan drawer. Pesan baru memperbarui indikator tanpa membuka drawer secara paksa. Escape dari dalam drawer menutup log dan mengembalikan fokus ke tombol pembukanya.
+
+Setiap entri memiliki ID, waktu, tingkat status, sumber, judul ringkas dan rincian berlabel. Judul panjang dipotong secara visual; buka **Detail** untuk membaca judul lengkap, nama file, schemaUrl, nama/ID fitur, atau alasan objek dilewati. Detail tertutup secara default. Satu peringatan schema mencakup semua fitur terkait; tidak ada popup per fitur. Error geometri menggunakan sumber dan tingkat yang berbeda dari warning metadata.
+
+Dua log Info awal menyimpan panduan aplikasi dan perencanaan: port FAT default 8 yang dapat diatur 1–25, pemilihan FAT dengan total jarak ke seluruh anggota, proses manual, serta batasan garis layanan. Impor sukses menambahkan log kesiapan data tanpa menjalankan perencanaan. Penghitungan manual menambahkan ringkasan hasil dan rincian validasi. Ekspor dan kontrol yang masih placeholder juga memberi status yang sesuai lewat log.
+
+Riwayat memakai React state dan dibatasi **300 entri terbaru** per sesi; penghitung mencerminkan entri yang masih disimpan. Log tidak disimpan ke backend atau localStorage. Muat ulang mengembalikan log panduan awal. Drawer terbuka mengambil sebagian tinggi area kerja; map Leaflet menyesuaikan ukuran tanpa membuat instance baru.
 
 ## 7. Fitur viewer dan status implementasi
 
@@ -216,14 +243,14 @@ Bila tidak ada rumah valid, panel menjelaskan bahwa tidak ada kelompok yang bisa
 | Preferensi layer | Tersedia | Disimpan di localStorage dan dipulihkan saat halaman dibuka; reset dan fallback bila storage tidak tersedia |
 | Label | Sebagian | Tooltip teks saat hover; dinonaktifkan saat opsi mati; belum berbasis zoom |
 | Ukur jarak | Sebagian | State dan rumus ada; klik peta belum mengisi titik ukur dan hasil belum ditampilkan |
-| Buffer | Sebagian | Input awal “100” dan pemanggilan toast saja; tidak membuat atau menggambar geometri buffer |
+| Buffer | Sebagian | Input awal “100” dan log bahwa fitur belum tersedia; tidak membuat atau menggambar geometri buffer |
 | Koordinat kursor dan skala | Sebagian | Koordinat kursor masih “—”; skala dummy dihapus, perhitungan skala belum tersedia |
-| Notifikasi | Tersedia | Satu toast hasil impor; panel umum, kelompok peringatan metadata berisi nama/ID/schema, dan masalah geometri yang terpisah |
+| Log aplikasi | Tersedia | Drawer bawah yang bisa disembunyikan, penghitung Info/Success/Warning/Error, ringkasan terpotong dan detail yang dapat dibuka; metadata dan geometri tetap dipisah |
 | Clustering marker / label berdasarkan zoom | Direncanakan | Dependency clustering belum digunakan |
 | Validasi, deduplikasi, koreksi manual survei | Sebagian | Validasi XML/koordinat/geometri dasar tersedia; deduplikasi, validasi topologi dan editor belum ada |
 | Penyimpanan proyek | Direncanakan | Hanya state selama sesi; muat ulang kehilangan impor |
 | Jaringan distribusi otomatis dan koreksinya | Direncanakan | Belum ada graf antartiang |
-| Clustering pelanggan dan kandidat FAT | Sebagian | Grouping greedy maksimal 8 rumah; tiang dengan jumlah jarak terkecil; overlay dan detail interaktif. Belum ada routing/batas drop/koreksi manual |
+| Clustering pelanggan dan kandidat FAT | Sebagian | Grouping greedy mengikuti port FAT (default 8, maksimum 25 rumah); tiang dengan jumlah jarak terkecil; overlay dan detail interaktif. Belum ada routing/batas drop/koreksi manual |
 | Penempatan FDT | Direncanakan | Belum ada algoritma penempatan FDT |
 | Link budget | Direncanakan | Belum ada model perangkat atau kalkulasi |
 | BoQ dan ekspor CSV/Excel | Direncanakan | Belum ada aturan kuantitas atau tabel material |
@@ -248,7 +275,7 @@ Semua mekanisme dalam bagian ini adalah rancangan kebutuhan, kecuali dinyatakan 
 - **Mekanisme sederhana:** pilih kandidat FAT pada tiang yang dapat dipasang; alokasikan rumah dengan menjaga kapasitas port dan batas panjang kabel. Gunakan panjang rute kabel yang memungkinkan bila jaringan tersedia. Jika hanya ada jarak garis lurus, beri label estimasi awal dan minta pemeriksaan. Tandai rumah belum terlayani atau melebihi batas; sediakan koreksi penugasan manual.
 - **Output:** lokasi FAT, daftar rumah yang dilayani, penggunaan/sisa port, geometri serta panjang drop, dan daftar pelanggan bermasalah.
 - **Parameter:** kapasitas FAT, batas drop, cadangan port, kandidat tiang, aturan pengelompokan dan prioritas — **Perlu ditentukan**.
-- **Status:** **Sebagian**. MVP sudah mengelompokkan maksimal 8 rumah dan memilih kandidat FAT pada tiang berdasarkan jumlah jarak geografis ke semua anggota, dengan relasi layanan terpisah. Pembatas panjang drop, rute kabel, kapasitas perangkat fisik/cadangan port, rumah melampaui jangkauan, dan koreksi penugasan manual masih direncanakan.
+- **Status:** **Sebagian**. MVP sudah mengelompokkan rumah sesuai konfigurasi port FAT (default 8, maksimum 25) dan memilih kandidat FAT pada tiang berdasarkan jumlah jarak geografis ke semua anggota, dengan relasi layanan terpisah. Pembatas panjang drop, rute kabel, kapasitas perangkat fisik/cadangan port, rumah melampaui jangkauan, dan koreksi penugasan manual masih direncanakan.
 
 **Clustering pelanggan untuk perencanaan berbeda dari clustering marker.** Yang pertama menentukan hubungan layanan dan kapasitas; yang kedua hanya merapikan tampilan peta. Dependency `react-leaflet-cluster` tidak menyelesaikan penempatan FAT.
 
@@ -301,7 +328,7 @@ Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadanga
 | Nama, kategori, sumber, properti tambahan | Nama/sumber/properti disimpan; kategori dari nama dan jenis garis | Skema atribut wajib dan aturan koreksi kategori: **Perlu ditentukan** |
 | Koneksi antartiang/jalan/koridor | Belum tersedia sebagai graf | Sumber data, arah koneksi dan kelayakan lintasan: **Perlu ditentukan** |
 | Lokasi sumber jaringan/OLT | Belum tersedia | Koordinat, kapasitas, titik sambung: **Perlu ditentukan** |
-| Kapasitas FAT/FDT | Kelompok MVP dibatasi 8 rumah; kapasitas perangkat fisik belum dimodelkan | Port, hierarki dan cadangan kapasitas perangkat: **Perlu ditentukan** |
+| Kapasitas FAT/FDT | FAT dapat dikonfigurasi 1–25 port, default 8; satu rumah memakai satu port. Kapasitas FDT belum dimodelkan | Validasi perangkat fisik, kapasitas FDT, hierarki dan cadangan port: **Perlu ditentukan** |
 | Batas panjang drop dan bentang | Belum dikonfigurasi | Nilai, satuan dan dasar pemilihan: **Perlu ditentukan** |
 | Rasio dan susunan splitter | Belum dimodelkan | Jenis, tingkatan dan loss perangkat: **Perlu ditentukan** |
 | Parameter optik | Belum dimodelkan | Perangkat, wavelength, daya/loss/rentang penerimaan: **Perlu ditentukan** |
@@ -317,7 +344,7 @@ Angka awal input buffer “100”, koordinat/pusat peta Bandung, dan zoom `14` m
 | --- | --- | --- |
 | 1. Viewer dan validasi survei | Impor KML/KMZ lengkap, normalisasi GeoJSON, validasi, kategori, detail, filter, ekspor valid | Sebagian: impor KML/KMZ, geometri, ekspor dan validasi dasar tersedia; editor belum tersedia |
 | 2. Jaringan antartiang | Graf koridor, usulan koneksi, koreksi manual, tanda tidak terhubung, panjang segmen | Direncanakan |
-| 3. Clustering rumah dan FAT | Penempatan pada tiang, kapasitas port, rute drop, rumah belum terlayani | Sebagian: grouping maksimal 8 dan kandidat berdasarkan jarak tersedia; routing/drop/kapasitas perangkat belum tersedia |
+| 3. Clustering rumah dan FAT | Penempatan pada tiang, kapasitas port, rute drop, rumah belum terlayani | Sebagian: grouping dengan konfigurasi 1–25 port dan kandidat berdasarkan jarak tersedia; routing/drop/validasi perangkat belum tersedia |
 | 4. FDT dan sumber jaringan | Sentralitas melalui graf, kapasitas/cakupan, koneksi sumber, koreksi lokasi | Direncanakan |
 | 5. Link budget | Model perangkat, rincian loss, estimasi daya dan evaluasi rentang | Direncanakan |
 | 6. BoQ dan ekspor | Rekap yang dapat ditelusuri, cadangan terpisah, CSV/Excel | Direncanakan |
@@ -333,7 +360,7 @@ Setiap tahap memerlukan pemeriksaan manual dan data uji sebelum melanjutkan otom
 - Panjang garis geospasial telah dihitung; ini bukan hasil perencanaan kabel beserta cadangannya. Skala belum ditampilkan, serta buffer dan mode ukur belum lengkap. Status “Data dimuat” hanya menandakan adanya fitur impor, bukan validasi teknis survei.
 - Data jalan/koridor, akses pemasangan, hambatan, kapasitas, OLT, dan spesifikasi optik harus dilengkapi sebelum hasil otomatis dianggap layak ditinjau.
 - Akurasi dan kelayakan pemasangan harus diperiksa terhadap koordinat survei serta kondisi lapangan; screenshot tidak cukup.
-- Script `test` menguji importer, ekspor geometri, logika grouping/skor FAT, dan kontrak overlay; script lint belum tersedia. `typescript.ignoreBuildErrors: true` membuat build produksi tidak menjadi bukti kelulusan pemeriksaan tipe.
+- Script `test` menguji importer, ekspor geometri, logika grouping/skor FAT, kontrak overlay, serta struktur/penghitung/perilaku drawer log; script lint belum tersedia. `typescript.ignoreBuildErrors: true` membuat build produksi tidak menjadi bukti kelulusan pemeriksaan tipe.
 - Model `FeatureItem` kini dipakai bersama oleh importer, viewer dan peta; ketidakcocokan tipe callback `onSelect` sebelumnya sudah diselesaikan.
 
 ## 12. Cara menjalankan project
@@ -380,7 +407,7 @@ Daftar berikut adalah kriteria pemeriksaan, **bukan klaim semua telah lulus**.
 - Uji pencarian dan ekspor Point, LineString, Polygon berlubang, serta geometri campuran. Periksa urutan longitude, latitude dan kesamaan geometri; ekspor dinonaktifkan bila hasil pencarian kosong.
 - Sebelum menyatakan dukungan KML/KMZ lengkap, uji arsip berisi KML, XML rusak, geometri campuran, koordinat kosong/di luar rentang, properti tambahan, ID ganda, dan impor ulang. Hasil harus memberi laporan penerimaan/penolakan yang jelas.
 - Sebelum menyatakan pengukuran atau buffer siap, pastikan kontrol mengubah data/geometri dan angka berasal dari perhitungan, bukan placeholder.
-- Uji perencanaan dengan 0, 1, 8, 9 dan lebih banyak rumah; setiap rumah valid harus tepat satu kelompok maksimal 8. Periksa kandidat terhadap total jarak seluruh anggota, tie yang konsisten, kondisi tanpa tiang, dan perhitungan ulang setelah data berubah.
+- Uji perencanaan dengan 0, 1, 8, 9 dan lebih banyak rumah; setiap rumah valid harus tepat satu kelompok dengan jumlah anggota tidak melebihi port FAT yang dipilih. Uji kapasitas 1, 8, 16 dan 25 serta nilai 0, 26, pecahan dan non-finite yang harus ditolak. Periksa kandidat terhadap total jarak seluruh anggota, tie yang konsisten, kondisi tanpa tiang, dan perhitungan ulang setelah data berubah.
 - Uji reload agar perilaku kehilangan data sesi dipahami. Persistensi baru boleh dinyatakan tersedia setelah implementasi dan pengujiannya ada.
 - Uji pergantian basemap tanpa kehilangan layer/pusat peta; visibility tiap kategori; warna/ukuran/garis/transparansi; urutan depan/belakang; tutup/buka panel; reload preferensi, storage rusak dan storage tidak tersedia. Uji kontrak renderer memakai mock Leaflet dan hook, sehingga tidak menggantikan pemeriksaan visual browser.
 - Jalankan instalasi, build dan smoke test; catat pemeriksaan tipe secara terpisah karena konfigurasi saat ini mengabaikan error tipe saat build.

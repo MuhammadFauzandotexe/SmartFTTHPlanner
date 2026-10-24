@@ -63,11 +63,11 @@ test('different groups may share a pole but keep separate candidate IDs and serv
   }
 })
 
-test('no poles still produces all house groups with explicit missing candidate status', () => {
+test('no poles leaves houses unserved with explicit missing candidate status', () => {
   const plan = planFtth([feature('h', 'Rumah', 107, -6)])
   assert.equal(plan.homeCount, 1)
-  assert.equal(plan.groups.length, 1)
-  assert.equal(plan.groups[0].candidate, null)
+  assert.equal(plan.groups.length, 0)
+  assert.equal(plan.unservedHomes.length, 1)
   assert(plan.warnings.some(warning => warning.includes('Tiang valid')))
   const empty = planFtth([])
   assert.equal(empty.groups.length, 0)
@@ -80,14 +80,14 @@ test('invalid coordinates, duplicate IDs and non-point geometries are reported a
   assert.equal(homes.length, 1)
   assert.equal(poles.length, 0)
   assert.equal(issues.length, 4)
-  assert.equal(planFtth(input).groups[0].homes.length, 1)
+  assert.equal(planFtth(input).unservedHomes.length, 1)
 })
 
 test('planning reads canonical GeoJSON coordinates and leaves all frozen survey data unchanged', () => {
   const home = feature('h', 'Rumah', 107, -6)
   home.coords = [0, 0] // The separate detail coordinate must not drive planning.
   home.props.HPTAR_ID = '000123'
-  const pole = feature('p', 'Tiang', 107.001, -6)
+  const pole = feature('p', 'Tiang', 107.0001, -6)
   const input = [home, pole]
   const original = structuredClone(input)
   const freeze = value => { Object.freeze(value); for (const item of Object.values(value)) if (item && typeof item === 'object' && !Object.isFrozen(item)) freeze(item) }
@@ -120,7 +120,7 @@ test('imported project KMZ can be planned end to end with every valid house assi
   const { importSurveyFile } = require('../lib/import-survey.ts')
   const imported = await importSurveyFile(new File([fs.readFileSync(samplePath)], 'Data-Mentah.kmz'))
   const sourceBefore = JSON.stringify(imported.features)
-  const plan = planFtth(imported.features)
+  const plan = planFtth(imported.features, 8, 1000000)
   const homes = imported.features.filter(feature => feature.category === 'Rumah' && feature.geometry.type === 'Point')
   const poles = new Set(imported.features.filter(feature => feature.category === 'Tiang' && feature.geometry.type === 'Point').map(feature => feature.id))
   assert(homes.length > 0)
@@ -131,4 +131,69 @@ test('imported project KMZ can be planned end to end with every valid house assi
   assert.deepEqual(plan.issues, [])
   assert.equal(JSON.stringify(imported.features), sourceBefore)
   console.log(`Sample planning: ${plan.homeCount} houses, ${plan.poleCount} poles, ${plan.groups.length} groups.`)
+})
+
+
+for (const capacity of [1, 8, 16, 25]) {
+  test(`configured FAT capacity ${capacity} controls every group and the result snapshot`, () => {
+    const houses = Array.from({ length: 51 }, (_, index) => feature(`h${index}`, 'Rumah', 107 + index * 0.0001, -6))
+    const input = [...houses, feature('p', 'Tiang', 107, -6)]
+    const original = JSON.stringify(input)
+    const plan = planFtth(input, capacity, 1000000)
+    assert.equal(plan.fatPorts, capacity)
+    assert.equal(plan.groups.length, Math.ceil(51 / capacity))
+    assert(plan.groups.every(group => group.homes.length <= capacity && group.candidate.connections.length === group.homes.length))
+    const ids = plan.groups.flatMap(group => group.homes.map(home => home.id))
+    assert.equal(ids.length, 51)
+    assert.equal(new Set(ids).size, 51)
+    assert.equal(JSON.stringify(input), original)
+  })
+}
+
+test('invalid FAT capacities are rejected, including for empty inputs', () => {
+  const { validateFatPorts } = require('../lib/ftth-planning.ts')
+  for (const invalid of [0, -1, 26, 100, 2.5, NaN, Infinity, '8', null]) {
+    assert.throws(() => validateFatPorts(invalid), RangeError)
+    assert.throws(() => groupHomes([], invalid), RangeError)
+    assert.throws(() => planFtth([], invalid), RangeError)
+  }
+  assert.equal(validateFatPorts(1), 1)
+  assert.equal(validateFatPorts(25), 25)
+})
+
+for (const factor of [0.5, 1, 2]) {
+  test(`drop hard limit with distance/bound ratio ${factor}`, () => {
+    const home = feature('h', 'Rumah', 0.001)
+    const pole = feature('p', 'Tiang', 0)
+    const meters = planningDistance(point('h', 0.001), point('p', 0))
+    const plan = planFtth([home, pole], 1, meters / factor)
+    assert.equal(plan.distanceMethod, 'straight-line')
+    assert.equal(plan.unservedHomes.length, factor > 1 ? 1 : 0)
+    assert.equal(plan.groups.length, factor > 1 ? 0 : 1)
+    if (factor > 1) {
+      assert.equal(plan.unservedHomes[0].fatId, 'FAT-G001')
+      assert.equal(plan.unservedHomes[0].distanceMeters, meters)
+    }
+  })
+}
+test('pruning keeps membership, ports, connection totals and coverage consistent', () => {
+  const plan = planFtth([feature('near', 'Rumah', 0), feature('far', 'Rumah', 0.01), feature('p', 'Tiang', 0)], 2, 100)
+  const group = plan.groups[0]
+  assert.deepEqual(group.homes.map(home => home.id), ['near'])
+  assert.deepEqual(group.candidate.connections.map(connection => connection.homeId), ['near'])
+  assert.equal(group.candidate.totalDistanceMeters, 0)
+  assert(group.homes.length <= plan.fatPorts)
+  assert.equal(plan.homeCount, group.homes.length + plan.unservedHomes.length)
+  assert.equal(plan.unservedHomes[0].home.id, 'far')
+})
+test('drop limit rejects invalid configuration even without data', () => {
+  for (const value of [0, -1, NaN, Infinity, '100', null]) assert.throws(() => planFtth([], 8, value), RangeError)
+})
+test('UI labels straight-line screening and maps unserved homes without active links', () => {
+  const panel = fs.readFileSync(require('node:path').join(__dirname, '../components/planning-panel.tsx'), 'utf8')
+  assert(panel.includes('belum memvalidasi lintasan pemasangan'))
+  const map = fs.readFileSync(require('node:path').join(__dirname, '../components/planning-map-layers.tsx'), 'utf8')
+  const unserved = map.slice(map.indexOf('for (const item of plan.unservedHomes)'), map.indexOf('// Shared poles'))
+  assert(unserved.includes('layers.homes.addLayer(marker)'))
+  assert(!unserved.includes('layers.links.addLayer'))
 })

@@ -11,9 +11,8 @@ type Props = {
   features: FeatureItem[]
   onChange: (settings: LayerSettings) => void
   onClose: () => void
-  storageError: boolean
 }
-export function LayerSettingsPanel({ settings, features, onChange, onClose, storageError }: Props) {
+export function LayerSettingsPanel({ settings, features, onChange, onClose }: Props) {
   const closeButton = useRef<HTMLButtonElement>(null)
   useEffect(() => { closeButton.current?.focus() }, [])
   const update = (category: Category, patch: Partial<LayerStyle>) => onChange({ ...settings, layers: { ...settings.layers, [category]: { ...settings.layers[category], ...patch } } })
@@ -21,7 +20,7 @@ export function LayerSettingsPanel({ settings, features, onChange, onClose, stor
     <div className="flex shrink-0 items-center justify-between border-b px-4 py-3"><div><h2 className="text-sm font-semibold">Layer Settings</h2><p className="text-[11px] text-slate-500">Tampilan peta dan urutan layer</p></div><Button ref={closeButton} size="icon-sm" variant="ghost" onClick={onClose} aria-label="Tutup Layer Settings"><X /></Button></div>
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
       <fieldset className="space-y-2"><legend className="mb-2 text-xs font-semibold">Base map</legend>{(["street", "satellite"] as const).map(key => <label key={key} className="flex cursor-pointer items-center gap-2 rounded-lg border p-2 text-xs"><input type="radio" name="base-map" value={key} checked={settings.baseMap === key} onChange={() => onChange({ ...settings, baseMap: key })} /><span>{baseMaps[key].name}<small className="block text-slate-500">{baseMaps[key].provider}</small></span></label>)}<a className="text-[11px] text-blue-600 underline" href={baseMaps[settings.baseMap].terms} target="_blank" rel="noreferrer">Ketentuan penyedia peta</a></fieldset>
-      <div><h3 className="text-xs font-semibold">Layer survei</h3><p className="mt-1 text-[11px] text-slate-500">Urutan teratas ditampilkan paling depan. Ukuran dalam piksel.</p></div>
+      <h3 className="text-xs font-semibold">Layer survei</h3>
       {settings.order.map((category, index) => {
         const style = settings.layers[category]
         const items = features.filter(feature => feature.category === category)
@@ -35,7 +34,6 @@ export function LayerSettingsPanel({ settings, features, onChange, onClose, stor
           {kinds.has("polygon") && <label className="block text-xs">Transparansi poligon {category}: {Math.round((1 - style.fillOpacity) * 100)}%<input aria-label={`Transparansi poligon ${category}`} className="mt-2 block w-full accent-emerald-600" type="range" min="0" max="100" step="1" value={Math.round((1 - style.fillOpacity) * 100)} onChange={event => update(category, { fillOpacity: 1 - Number(event.target.value) / 100 })} /></label>}
         </fieldset>
       })}
-      <p role="status" className="text-[11px] text-slate-500">{storageError ? "Preferensi berlaku selama sesi ini; penyimpanan browser tidak tersedia." : "Preferensi tersimpan otomatis di browser ini. Data survei tetap hanya selama sesi."}</p>
       <Button size="sm" variant="outline" onClick={() => onChange(defaultLayerSettings())}><RotateCcw /> Kembalikan pengaturan awal</Button>
     </div>
   </section>

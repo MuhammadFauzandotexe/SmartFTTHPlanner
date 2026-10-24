@@ -258,3 +258,6 @@
 .planning-group-open { border-right: 1px solid rgb(255 255 255 / 50%); }
 .planning-group-open:hover, .planning-group-name:hover { background: rgb(255 255 255 / 20%); }
 .planning-group-open:focus-visible, .planning-group-name:focus-visible { outline: 2px solid white; outline-offset: -2px; }
+
+
+.control-section[open] > summary > .control-section-chevron { transform: rotate(180deg); }
