@@ -81,6 +81,9 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.14)
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
       postcss:
         specifier: ^8.5
         version: 8.5.6
@@ -1078,6 +1081,10 @@ packages:
         optional: true
       vue-router:
         optional: true
+
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -4123,6 +4130,8 @@ snapshots:
     optionalDependencies:
       next: 16.4.3(@babel/core@7.29.7)(@types/node@24.10.4)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       react: 19.2.4
+
+  '@xmldom/xmldom@0.9.12': {}
 
   accepts@2.0.0:
     dependencies:

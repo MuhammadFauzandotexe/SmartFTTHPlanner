@@ -6,7 +6,7 @@ Dokumen ini memisahkan kondisi kode saat ini dari kebutuhan pengembangan. Dasar 
 
 Smart FTTH Planner adalah aplikasi pemetaan dan perencanaan jaringan Fiber to the Home (FTTH). Data awal berasal dari survei lapangan berupa koordinat tiang dan rumah pelanggan dalam KML/KMZ.
 
-Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, kondisi awal kosong, impor KML terbatas, dan ekspor GeoJSON terbatas. Otomatisasi jaringan, penempatan perangkat, link budget, dan BoQ merupakan rencana pengembangan.
+Tahap awal berfokus pada viewer untuk mengimpor, menampilkan, dan memeriksa data survei. Kode saat ini merupakan prototipe **FTTH Survey Viewer**, dengan peta interaktif, kondisi awal kosong, impor KML/KMZ, dan ekspor GeoJSON yang mempertahankan geometri. Otomatisasi jaringan, penempatan perangkat, link budget, dan BoQ merupakan rencana pengembangan.
 
 Prinsip pengembangan:
 
@@ -28,10 +28,10 @@ Calon pengguna adalah petugas survei, perencana jaringan, dan pemeriksa hasil pe
 Alur yang sudah didukung secara terbatas:
 
 1. Buka halaman utama; aplikasi menampilkan peta tanpa objek survei dan petunjuk impor, bukan otomatis membaca file survei di root.
-2. Pilih **Impor Data** untuk memilih satu atau beberapa file. KML titik sederhana dapat ditambahkan; KMZ belum dibaca.
-3. Cari berdasarkan nama atau ID, lihat titik pada peta, dan klik titik untuk memeriksa kategori, koordinat, serta sumber file.
+2. Pilih **Impor Data** untuk memilih satu atau beberapa file. Arsip KMZ diekstrak dan seluruh KML di dalamnya dibaca; hasil dan peringatan ditampilkan pada panel.
+3. Cari berdasarkan nama atau ID, lihat titik, garis, dan poligon pada peta, dan klik objek untuk memeriksa kategori, koordinat, serta sumber file.
 4. Pilih rumah untuk melihat tiang terdekat berdasarkan jarak garis lurus.
-5. Gunakan zoom dan **Fit ke Data**, lalu ekspor fitur yang lolos pencarian menjadi GeoJSON dengan keterbatasan geometri yang dijelaskan di bawah.
+5. Gunakan zoom dan **Fit ke Data**, lalu ekspor fitur yang lolos pencarian menjadi GeoJSON dengan geometri dan properti aslinya.
 6. Muat ulang halaman akan menghapus hasil impor dari memori dan mengembalikan viewer ke kondisi kosong.
 
 Alur tujuan berikutnya: validasi survei → koreksi jaringan antartiang → penempatan FAT → penempatan FDT dan koneksi sumber → link budget → BoQ → pemeriksaan serta ekspor. Ini belum menjadi alur aplikasi yang dapat dijalankan.
@@ -45,24 +45,25 @@ Versi berikut adalah deklarasi `package.json`; awalan `^` merupakan rentang vers
 | Next.js | `16.4.3` | App Router; halaman utama dan layout; peta dimuat dinamis dengan `ssr: false` |
 | React / React DOM | `19.2.4` / `19.2.4` | Komponen dan state antarmuka |
 | TypeScript | `5.7.3` | Tipe data dan konfigurasi strict |
-| Leaflet / React Leaflet | `^1.9.4` / `^5.0.0` | Peta, tile OpenStreetMap, CircleMarker, zoom dan fit bounds |
-| Turf.js (`@turf/turf`) | `^7.4.0` | `point`, `distance` dalam meter, dan `bbox`; beberapa fungsi lain hanya diimpor |
-| JSZip | `^3.10.2` | Dependency tersedia, **belum digunakan**; diperlukan untuk ekstraksi KMZ |
-| `@tmcw/togeojson` | `^7.1.3` | Dependency tersedia, **belum digunakan**; konversi KML lengkap masih rencana |
+| Leaflet / React Leaflet | `^1.9.4` / `^5.0.0` | Peta, tile OpenStreetMap, GeoJSON, CircleMarker, zoom dan fit bounds |
+| Turf.js (`@turf/turf`) | `^7.4.0` | `point`, `distance`, `length`, `flattenEach`, dan `bbox` untuk jarak, panjang garis, dan batas geometri |
+| JSZip | `^3.10.2` | Ekstraksi KML dari arsip KMZ di browser |
+| `@tmcw/togeojson` | `^7.1.3` | Konversi KML ke geometri GeoJSON dan properti |
 | `react-leaflet-cluster` | `^4.1.3` | Dependency tersedia, **belum digunakan** untuk clustering marker |
 | `@base-ui/react` | `^1.5.0` | Primitive button, input, badge dan separator |
 | shadcn | `^4.11.0` | Konfigurasi `base-nova`, komponen lokal, dan stylesheet |
 | Tailwind CSS / plugin PostCSS | `^4.3.3` / `^4.3.3` | Styling; PostCSS `^8.5` sebagai alat build |
 | `tw-animate-css` | `^1.4.0` | Stylesheet animasi diimpor |
 | `lucide-react` | `^1.16.0` | Ikon antarmuka |
-| `sonner` | `^2.0.8` | Pemanggilan toast ada; komponen `<Toaster />` belum ditemukan, sehingga tampilan notifikasi belum dapat dianggap lengkap |
+| `sonner` | `^2.0.8` | Toast sukses/gagal impor dan ekspor; `<Toaster />` terpasang |
 | `class-variance-authority` | `^0.7.1` | Variasi komponen UI |
 | `clsx`, `tailwind-merge`, `cn` | `^2.1.1`, `^3.3.1`, `^0.5.0` | Penggabungan class CSS |
 | `@vercel/analytics` | `1.6.1` | Komponen Analytics dirender pada mode produksi |
 | Tipe Leaflet / Node / React / React DOM | `^1.9.22` / `^24` / `19.2.14` / `19.2.3` | Dukungan tipe pengembangan |
+| `@xmldom/xmldom` | `^0.9.12` | DOMParser untuk pengujian importer di Node; bukan runtime browser |
 | pnpm | `12.3.4` | Package manager yang dideklarasikan melalui `packageManager` |
 
-Arsitektur: `app/page.tsx` merender `FtthViewer`, komponen client yang menyimpan data melalui React state. Komponen itu memuat `MapView` di browser. Pembacaan KML menggunakan File API dan `DOMParser`, bukan togeojson. Ekspor menggunakan Blob dan tautan unduhan.
+Arsitektur: `app/page.tsx` merender `FtthViewer`, komponen client yang menyimpan data melalui React state. Komponen itu memuat `MapView` di browser. Pembacaan memakai File API, JSZip untuk KMZ, `DOMParser`, dan togeojson. Ekspor menggunakan Blob dan tautan unduhan.
 
 Tidak ditemukan API route, database, backend domain terpisah, penyimpanan localStorage/IndexedDB, maupun mesin perencanaan jaringan. Next.js tetap membutuhkan runtime Node.js untuk perintah pengembangan dan server produksi yang tersedia. Tile OpenStreetMap memerlukan akses jaringan; belum ada dukungan peta offline.
 
@@ -79,6 +80,10 @@ components/
   ui/                      Button, Badge, Input, Separator
 lib/
   utils.ts                 Helper penggabungan class CSS
+  survey.ts                Model data, kategori, validasi dan ekspor geometri
+  import-survey.ts          Pembaca KML/KMZ dan laporan impor
+tests/
+  import-survey.test.cjs    Uji parser, arsip, geometri, dan file contoh
 Data-Mentah.kmz             Berkas survei di root; tidak dimuat otomatis
 package.json               Dependency dan script
 pnpm-lock.yaml             Lockfile pnpm
@@ -94,41 +99,44 @@ Folder `hooks/` hanya disebut sebagai alias pada konfigurasi shadcn; belum ditem
 
 ## 6. Format input dan struktur data
 
-### Kondisi saat ini
+### Pembacaan dan validasi
 
-Pemilih file menerima `.kml` dan `.kmz`, tetapi hanya cabang KML yang mem-parsing isi. Parser membaca `Placemark`, mengambil `name` serta elemen `coordinates` pertama, memisahkan berdasarkan koma, dan memakai dua nilai pertama yang bernilai finite. Semua hasil dimasukkan sebagai `Point`.
+Pemilih menerima satu atau beberapa `.kml`/`.kmz`, tanpa membedakan huruf besar/kecil. `lib/import-survey.ts` mengekstrak KMZ menggunakan JSZip dan membaca seluruh KML di dalamnya, termasuk subfolder; entri `__MACOSX/` diabaikan. Tidak ada unggahan survei ke backend. KML dikonversi melalui `@tmcw/togeojson` setelah pemeriksaan XML dan elemen root.
 
-Parser belum membedakan Point, LineString, Polygon, atau MultiGeometry dengan benar; tidak ada validasi XML menyeluruh, rentang koordinat, CRS, duplikasi, ataupun pelestarian ExtendedData. Impor berulang menambahkan objek dan membuat ID berbasis nama file, indeks, serta `Date.now()`, sehingga ID bukan identitas survei yang stabil.
+Point, LineString, Polygon, bentuk Multi, serta GeometryCollection dipertahankan sebagai GeoJSON. Koordinat diperiksa agar finite dengan longitude dalam -180 sampai 180 dan latitude dalam -90 sampai 90. Garis harus memiliki minimal dua titik; cincin poligon minimal empat titik dan tertutup. Fitur tanpa geometri atau tidak valid dilewati dengan laporan. Ini belum mencakup validasi topologi seperti self-intersection.
 
-KMZ saat ini hanya memanggil notifikasi dan tidak diekstrak. Teks antarmuka yang menyatakan pembacaan KMZ aktif bukan bukti implementasi. Keberadaan `Data-Mentah.kmz` juga bukan bukti file telah dibaca atau divalidasi aplikasi.
+Arsip rusak/terenkripsi, arsip tanpa KML, dan file tanpa fitur valid menghasilkan pesan gagal. Bila satu KML dalam arsip gagal tetapi KML lain valid, fitur valid tetap dimuat dengan peringatan. NetworkLink eksternal tidak diambil dan gambar GroundOverlay tidak dirender. Ikon, foto, dan styling khusus KML tidak direproduksi; viewer memakai warna kategori sendiri.
 
-Bentuk data internal yang ditemukan:
+### Model data
+
+`lib/survey.ts` mendefinisikan model bersama untuk importer dan peta:
 
 ```ts
 type FeatureItem = {
-  id: string
+  id: string                         // ID internal unik setiap impor
   name: string
-  category: 'Tiang' | 'Rumah' | 'FAT' | 'FDT' | 'Jalur kabel' | 'Belum dikategorikan'
-  file: string
-  kind: 'Point' | 'LineString' | 'Polygon'
-  coords: [number, number] // [latitude, longitude], hanya satu pasangan
+  category: Category
+  file: string                       // nama KML/KMZ yang dipilih
+  kmlFile: string                    // jalur KML di dalam KMZ
+  kind: Geometry['type']
+  geometry: Geometry                // GeoJSON utuh, termasuk lubang poligon
+  coords: [number, number]           // latitude, longitude titik pertama
   description?: string
-  props?: Record<string, string>
+  props: GeoJsonProperties           // properti KML/ExtendedData
 }
 ```
 
-`description` dan `props` belum diisi parser. Satu pasangan koordinat tidak cukup untuk menyimpan garis/poligon. Kategori diperkirakan dari nama: FDT, FAT, POLE/TIANG, atau RUMAH/HOME/PELANGGAN; kategori lain menjadi “Belum dikategorikan”. Belum tersedia editor kategori.
+Geometri GeoJSON memakai **longitude, latitude**; altitude dipertahankan jika tersedia. `coords` hanya titik pertama untuk panel detail, bukan pengganti geometri penuh. Label panel membedakan “Latitude, Longitude” untuk Point dan “Titik awal (Lat, Lon)” untuk bentuk lain. ID KML asli disimpan sebagai `props.originalId` bila ada; ID internal bukan identitas survei permanen.
 
-Data dummy telah dihapus. State awal berisi nol fitur dan nol file; marker serta jumlah kategori hanya berasal dari hasil impor. Jumlah file dihitung dari nama sumber unik pada fitur yang berhasil dimuat, bukan jumlah semua file yang dipilih. File kosong atau gagal dibaca tidak masuk hitungan; dua file berbeda bernama sama dihitung sebagai satu sumber.
+Garis dan MultiLineString dikategorikan sebagai “Jalur kabel”. Untuk bentuk lain, nama diperiksa untuk FDT, FAT, POLE/TIANG, dan RUMAH/HOME/PELANGGAN; sisanya “Belum dikategorikan”. Editor kategori belum tersedia. Impor ulang menambahkan objek dengan ID internal baru; belum ada deduplikasi otomatis.
 
-### Aturan data yang diperlukan
+### Tampilan dan ekspor
 
-- GeoJSON menggunakan urutan **longitude, latitude**. Contoh Point: `[107.603, -6.9147]`.
-- Internal viewer memakai **latitude, longitude**, sesuai pemakaian Leaflet. Antarmuka saat ini hanya memberi label “Koordinat”; label eksplisit “Latitude, Longitude” masih perlu ditambahkan pada pengembangan berikutnya.
-- LineString membutuhkan daftar pasangan koordinat; Polygon membutuhkan cincin koordinat yang valid. Ekspor saat ini menukar urutan koordinat untuk Point dengan benar, tetapi tetap memberi satu pasangan untuk jenis garis/poligon sehingga belum aman untuk semua fitur.
-- Rencana pembacaan KMZ: ekstrak arsip dengan JSZip, pilih KML, konversi dengan togeojson, validasi, lalu normalisasi. Aturan memilih KML bila arsip berisi beberapa KML: **Perlu ditentukan**.
-- Perhitungan jarak dan luas harus menggunakan fungsi geospasial dengan satuan eksplisit; jangan menghitung jarak langsung dari selisih derajat. Jarak saat ini menggunakan Turf dalam meter; luas belum dihitung.
-- Screenshot peta bukan pengganti koordinat asli maupun data geometri survei.
+Peta mulai kosong. Setelah impor berhasil, pencarian dikosongkan dan peta dipusatkan ke batas seluruh geometri yang baru dimuat. Marker titik, garis, poligon, dan geometri campuran dapat dipilih untuk melihat detail sumbernya. Tombol Fit memakai semua fitur. Ekspor mempertahankan geometri dan properti fitur yang lolos pencarian.
+
+Jumlah file dihitung dari nama sumber unik pada fitur valid: dua file bernama sama dihitung sebagai satu sumber, sedangkan beberapa KML di dalam satu KMZ tetap dihitung satu file. Panjang garis dihitung dari seluruh LineString/MultiLineString, termasuk yang berada dalam GeometryCollection, dalam meter melalui Turf; keliling poligon tidak dihitung sebagai kabel. Luas belum dihitung.
+
+`Data-Mentah.kmz` tidak dimuat otomatis. Pengujian parser pada file tersebut menghasilkan **244 fitur: 243 Point dan 1 Polygon**. Screenshot peta tetap bukan pengganti koordinat asli atau pemeriksaan lapangan.
 
 ## 7. Fitur viewer dan status implementasi
 
@@ -136,23 +144,23 @@ Data dummy telah dihapus. State awal berisi nol fitur dan nol file; marker serta
 
 | Fitur | Status | Kondisi konkret |
 | --- | --- | --- |
-| Peta dasar dan marker berwarna | Tersedia | OpenStreetMap dan CircleMarker; kategori kabel tidak ditampilkan |
+| Peta dan geometri berwarna | Tersedia | OpenStreetMap, marker titik, garis kabel, poligon, dan geometri campuran melalui GeoJSON |
 | Zoom, fit bounds, buka/tutup sidebar | Tersedia | Fit memakai seluruh fitur, bukan hanya hasil pencarian |
 | Pencarian nama/ID | Tersedia | Menyaring marker, jumlah terlihat, dan data ekspor |
 | Pemilihan objek dan salin koordinat | Tersedia | Panel kategori, nama, ID, sumber, koordinat; Clipboard API memerlukan izin/konteks browser yang mendukung |
 | Rumah ke tiang terdekat | Tersedia | Jarak garis lurus dalam meter; bukan rute drop atau penugasan FAT |
-| Impor KML | Sebagian | Pembacaan titik sederhana; geometri lengkap dan validasi belum tersedia |
-| Impor KMZ | Sebagian | Pemilih menerima ekstensi; ekstraksi dan pembacaan isi belum tersedia |
-| Ekspor GeoJSON | Sebagian | Mengunduh fitur hasil pencarian; geometri garis/poligon belum valid |
-| Ringkasan survei | Sebagian | Jumlah sumber file, fitur, kategori, dan status mengikuti data impor; panjang garis ditandai “Belum dihitung” saat ada data, “—” saat kosong |
+| Impor KML | Tersedia | Konversi geometri dan ExtendedData; pemeriksaan XML, koordinat, serta struktur geometri dasar |
+| Impor KMZ | Tersedia | Ekstraksi seluruh KML termasuk subfolder; laporan sukses/peringatan/gagal; auto-fit hasil impor |
+| Ekspor GeoJSON | Tersedia | Mengunduh hasil pencarian dengan geometri asli, atribut dan sumber KML/KMZ |
+| Ringkasan survei | Tersedia | Jumlah sumber file, fitur, kategori, status dan panjang garis berdasarkan hasil impor |
 | Filter layer/kategori | Sebagian | Tombol kategori tidak mengubah fitur; belum menyembunyikan layer |
-| Label | Sebagian | Tooltip dipasang saat hover jika opsi aktif; belum berbasis zoom dan belum ada pelepasan tooltip yang jelas saat opsi dimatikan |
+| Label | Sebagian | Tooltip teks saat hover; dinonaktifkan saat opsi mati; belum berbasis zoom |
 | Ukur jarak | Sebagian | State dan rumus ada; klik peta belum mengisi titik ukur dan hasil belum ditampilkan |
 | Buffer | Sebagian | Input awal “100” dan pemanggilan toast saja; tidak membuat atau menggambar geometri buffer |
 | Koordinat kursor dan skala | Sebagian | Koordinat kursor masih “—”; skala dummy dihapus, perhitungan skala belum tersedia |
-| Notifikasi | Sebagian | Pemanggilan Sonner ada; host Toaster belum ditemukan |
+| Notifikasi | Tersedia | Toast dan panel hasil impor dengan pesan tiap file |
 | Clustering marker / label berdasarkan zoom | Direncanakan | Dependency clustering belum digunakan |
-| Validasi, deduplikasi, koreksi manual survei | Direncanakan | Belum ada editor atau laporan validasi |
+| Validasi, deduplikasi, koreksi manual survei | Sebagian | Validasi XML/koordinat/geometri dasar tersedia; deduplikasi, validasi topologi dan editor belum ada |
 | Penyimpanan proyek | Direncanakan | Hanya state selama sesi; muat ulang kehilangan impor |
 | Jaringan distribusi otomatis dan koreksinya | Direncanakan | Belum ada graf antartiang |
 | Clustering pelanggan dan penempatan FAT | Direncanakan | Belum ada algoritma penempatan FAT |
@@ -171,7 +179,7 @@ Semua mekanisme dalam bagian ini adalah rancangan kebutuhan, kecuali dinyatakan 
 - **Mekanisme sederhana:** jadikan tiang kandidat simpul graf dan koridor yang diizinkan sebagai kandidat koneksi. Hitung panjang tiap segmen, saring dengan batas bentang, lalu susun usulan koneksi sesuai cakupan yang dibutuhkan. Bila koridor belum ada, koneksi berdasarkan kedekatan hanya usulan awal untuk pemeriksaan lapangan. Pengguna harus dapat menambah/menghapus koneksi secara manual; tandai simpul yang tidak terhubung.
 - **Output:** geometri jalur distribusi, urutan atau daftar koneksi tiang, panjang setiap segmen, dan daftar tiang tidak terhubung.
 - **Parameter:** batas jarak antartiang, koridor yang diizinkan, hambatan, aturan pemilihan koneksi, serta titik awal/tujuan — **Perlu ditentukan**.
-- **Status:** **Direncanakan**. Saat ini hanya dapat menampilkan marker titik impor; graf dan geometri rute belum tersedia.
+- **Status:** **Direncanakan**. Saat ini dapat menampilkan titik dan jalur yang sudah ada dalam file impor; graf antartiang dan pembentukan rute otomatis belum tersedia.
 
 ### 8.2 Penempatan FAT otomatis dan clustering rumah berdasarkan kabel drop
 
@@ -221,7 +229,7 @@ Hasil merupakan estimasi perencanaan; nilai OPM aktual diperoleh dari pengukuran
 - **Mekanisme sederhana:** hitung jumlah objek/perangkat berdasarkan ID unik, jumlahkan panjang rute tiap jenis kabel, lalu terapkan aturan cadangan sekali saja. Pisahkan tiang existing hasil survei dari kebutuhan tiang baru. Komponen tanpa aturan perhitungan diberi status input manual atau belum dihitung, bukan diasumsikan nol.
 - **Output:** tabel item, spesifikasi, satuan, kuantitas, dan dasar perhitungan; harga satuan serta total biaya opsional. Ekspor CSV atau Excel direncanakan.
 - **Parameter:** katalog item, satuan, klasifikasi existing/baru, pembulatan, persentase/aturan cadangan, dan harga opsional — **Perlu ditentukan**.
-- **Status:** **Direncanakan**. Jumlah kategori dalam viewer bukan rekap BoQ; panjang garis belum dihitung dan tidak dapat menjadi dasar kuantitas material.
+- **Status:** **Direncanakan**. Jumlah kategori dalam viewer bukan rekap BoQ; panjang garis impor sudah dihitung, tetapi belum diubah menjadi kuantitas material beserta cadangannya.
 
 Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadangan tidak dihitung dua kali. Aturan kebutuhan tiang baru, aksesoris, dan material lain belum tersedia.
 
@@ -229,8 +237,8 @@ Panjang rute dan tambahan cadangan kabel harus ditampilkan terpisah agar cadanga
 
 | Data/parameter | Kondisi saat ini | Keputusan/kebutuhan berikutnya |
 | --- | --- | --- |
-| Koordinat dan ID unik tiang/rumah | Impor titik; ID impor tidak stabil | Identitas survei permanen, validasi rentang, deduplikasi: **Perlu ditentukan** |
-| Nama, kategori, sumber, properti tambahan | Nama/sumber disimpan; kategori dari nama | Skema atribut, pemetaan kategori, pelestarian properti: **Perlu ditentukan** |
+| Koordinat dan ID unik tiang/rumah | Impor geometri dan properti; ID internal dibuat per impor | Identitas survei permanen, validasi rentang, deduplikasi: **Perlu ditentukan** |
+| Nama, kategori, sumber, properti tambahan | Nama/sumber/properti disimpan; kategori dari nama dan jenis garis | Skema atribut wajib dan aturan koreksi kategori: **Perlu ditentukan** |
 | Koneksi antartiang/jalan/koridor | Belum tersedia sebagai graf | Sumber data, arah koneksi dan kelayakan lintasan: **Perlu ditentukan** |
 | Lokasi sumber jaringan/OLT | Belum tersedia | Koordinat, kapasitas, titik sambung: **Perlu ditentukan** |
 | Kapasitas FAT/FDT | Belum dimodelkan | Port, hierarki dan cadangan kapasitas: **Perlu ditentukan** |
@@ -247,7 +255,7 @@ Angka awal input buffer “100”, koordinat/pusat peta Bandung, dan zoom `14` m
 
 | Tahap | Lingkup dan hasil yang dituju | Kondisi saat ini |
 | --- | --- | --- |
-| 1. Viewer dan validasi survei | Impor KML/KMZ lengkap, normalisasi GeoJSON, validasi, kategori, detail, filter, ekspor valid | Sebagian: fondasi viewer dan parser titik |
+| 1. Viewer dan validasi survei | Impor KML/KMZ lengkap, normalisasi GeoJSON, validasi, kategori, detail, filter, ekspor valid | Sebagian: impor KML/KMZ, geometri, ekspor dan validasi dasar tersedia; filter/editor belum lengkap |
 | 2. Jaringan antartiang | Graf koridor, usulan koneksi, koreksi manual, tanda tidak terhubung, panjang segmen | Direncanakan |
 | 3. Clustering rumah dan FAT | Penempatan pada tiang, kapasitas port, rute drop, rumah belum terlayani | Direncanakan |
 | 4. FDT dan sumber jaringan | Sentralitas melalui graf, kapasitas/cakupan, koneksi sumber, koreksi lokasi | Direncanakan |
@@ -259,14 +267,14 @@ Setiap tahap memerlukan pemeriksaan manual dan data uji sebelum melanjutkan otom
 ## 11. Keterbatasan dan kebutuhan data
 
 - Viewer mulai kosong dan hanya memuat data hasil impor. Belum ada manajemen proyek/file yang lengkap; jumlah sumber dihitung dari nama file unik.
-- Parser KML dapat salah menafsirkan garis atau poligon sebagai titik. KMZ, ExtendedData, geometri kompleks, dan validasi kesalahan masih perlu ditangani.
+- NetworkLink eksternal, gambar GroundOverlay, ikon/foto dalam arsip, dan styling KML khusus belum ditampilkan. Validasi topologi, deduplikasi dan target volume data belum ditetapkan.
 - Belum ada persistence, editor koordinat/kategori, undo/redo, atau koreksi koneksi. Muat ulang menghapus data impor.
 - Banyak titik dapat menyebabkan kepadatan visual. Clustering tampilan, label berdasarkan zoom, dan filter layer merupakan kebutuhan; saat ini belum lengkap.
-- Panjang impor belum dihitung, skala belum ditampilkan, serta buffer dan mode ukur belum lengkap. Status “Data dimuat” hanya menandakan adanya fitur impor, bukan validasi teknis survei.
+- Panjang garis geospasial telah dihitung; ini bukan hasil perencanaan kabel beserta cadangannya. Skala belum ditampilkan, serta buffer dan mode ukur belum lengkap. Status “Data dimuat” hanya menandakan adanya fitur impor, bukan validasi teknis survei.
 - Data jalan/koridor, akses pemasangan, hambatan, kapasitas, OLT, dan spesifikasi optik harus dilengkapi sebelum hasil otomatis dianggap layak ditinjau.
 - Akurasi dan kelayakan pemasangan harus diperiksa terhadap koordinat survei serta kondisi lapangan; screenshot tidak cukup.
-- Tidak ditemukan script lint/test dan rangkaian uji otomatis project. `typescript.ignoreBuildErrors: true` membuat build produksi tidak menjadi bukti kelulusan pemeriksaan tipe.
-- Pemeriksaan tipe awal menemukan ketidakcocokan callback `onSelect`: `MapFeature` pada `map-view.tsx` tidak memuat `file` dan `kind` yang diperlukan `FeatureItem` pada viewer. Ini adalah masalah yang sudah ada, bukan fitur yang diperbaiki oleh dokumentasi.
+- Script `test` menguji importer dan ekspor geometri; script lint belum tersedia. `typescript.ignoreBuildErrors: true` membuat build produksi tidak menjadi bukti kelulusan pemeriksaan tipe.
+- Model `FeatureItem` kini dipakai bersama oleh importer, viewer dan peta; ketidakcocokan tipe callback `onSelect` sebelumnya sudah diselesaikan.
 
 ## 12. Cara menjalankan project
 
@@ -294,8 +302,9 @@ Script yang benar-benar ada:
 | `dev` | `next dev` | Server pengembangan |
 | `build` | `next build` | Build produksi |
 | `start` | `next start` | Menjalankan build produksi |
+| `test` | `node --test tests/*.test.cjs` | Uji importer dan ekspor menggunakan Node test runner |
 
-Tidak ada script `test`, `lint`, atau `typecheck`. Pemeriksaan tipe dapat dijalankan melalui `pnpm exec tsc --noEmit`; hasilnya perlu ditinjau terpisah dari build. Versi Next.js terpasang dapat diperiksa melalui `pnpm exec next --version`.
+Jalankan `pnpm test` untuk menguji importer. Pengujian dijalankan pada Node.js 22.22.1 dengan File API bawaan. Dependency pengujian `@xmldom/xmldom` (`^0.9.12`) menyediakan DOMParser di Node. Tidak ada script `lint` atau `typecheck`. Pemeriksaan tipe dapat dijalankan melalui `pnpm exec tsc --noEmit`; hasilnya perlu ditinjau terpisah dari build. Versi Next.js terpasang dapat diperiksa melalui `pnpm exec next --version`.
 
 `pnpm-workspace.yaml` memuat `pmOnFail: ignore` serta pengecualian minimum release age untuk `next` dan `@next/*`; pertahankan kebijakan tersebut saat pemeliharaan. Tidak ditemukan kebutuhan konfigurasi database atau kredensial backend untuk viewer dasar. Pengunduhan dependency dan tile peta membutuhkan jaringan.
 
@@ -308,7 +317,7 @@ Daftar berikut adalah kriteria pemeriksaan, **bukan klaim semua telah lulus**.
 - Pastikan halaman `/` terbuka tanpa marker survei, jumlah file/fitur/kategori nol, dan petunjuk impor tampil. Tombol fit serta ekspor dinonaktifkan saat tidak ada data yang relevan. Setelah impor KML titik, periksa zoom, fit, pencarian, pemilihan dan salin koordinat sesuai dukungan browser.
 - Uji KML titik kecil dengan koordinat yang diketahui; bandingkan lokasi, kategori, nama dan sumber dengan file asli.
 - Untuk rumah terpilih, periksa estimasi tiang terdekat menggunakan jarak geospasial dalam meter; jangan menganggapnya panjang kabel aktual.
-- Uji pencarian dan ekspor dengan fitur Point saja. Periksa urutan longitude, latitude. Ekspor dinonaktifkan bila hasil pencarian kosong; dukungan garis/poligon tetap perlu diperbaiki sebelum parser diperluas.
+- Uji pencarian dan ekspor Point, LineString, Polygon berlubang, serta geometri campuran. Periksa urutan longitude, latitude dan kesamaan geometri; ekspor dinonaktifkan bila hasil pencarian kosong.
 - Sebelum menyatakan dukungan KML/KMZ lengkap, uji arsip berisi KML, XML rusak, geometri campuran, koordinat kosong/di luar rentang, properti tambahan, ID ganda, dan impor ulang. Hasil harus memberi laporan penerimaan/penolakan yang jelas.
 - Sebelum menyatakan filter, pengukuran, buffer, atau ringkasan siap, pastikan kontrol mengubah data/geometri dan angka berasal dari perhitungan, bukan placeholder.
 - Uji reload agar perilaku kehilangan data sesi dipahami. Persistensi baru boleh dinyatakan tersedia setelah implementasi dan pengujiannya ada.
