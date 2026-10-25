@@ -217,10 +217,15 @@ export default function FtthViewer() {
   }, [features, selectSurveyObject])
   const highlightPlanningGroup = useCallback((id: string) => {
     if (plan?.groups.some(group => group.id === id)) {
+      setSelectedGroupId(id)
+      setResultsOpen(true)
+      setSection("planning", true)
+      setSelected(null)
+      setCollapsed(false)
       setHoveredGroupId(null)
       setHighlightedGroupId(previous => previous === id ? null : id)
     }
-  }, [plan])
+  }, [plan, setSection])
   const hoverPlanningGroup = useCallback((id: string | null) => setHoveredGroupId(id), [])
   const focusProposal = useCallback((proposal: Proposal) => {
     setFocusedProposal(proposal)

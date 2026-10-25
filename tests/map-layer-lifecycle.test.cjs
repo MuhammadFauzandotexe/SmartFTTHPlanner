@@ -171,7 +171,8 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     class Layer {
       constructor() { this.events = {} }
       on(name, fn) { this.events[name] = fn; return this }
-      bindTooltip(text) { this.tooltip = text; return this }
+      bindTooltip(text, options) { this.tooltip = text; this.tooltipOptions = options; return this }
+      unbindTooltip() { this.tooltip = null; return this }
       bindPopup(popup) { this.popup = popup; return this }
       closePopup() { return this }
       setStyle(style) { this.style = { ...this.style, ...style }; return this }
@@ -240,6 +241,8 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     harness.render(() => PlanningMapLayers(props))
     assert.equal(links.children[0].style.weight, 4)
     assert.equal(links.children[0].style.opacity, 1)
+    assert.equal(links.children[0].tooltipOptions.permanent, true)
+    assert.equal(links.children[0].tooltip.textContent, '0 m')
     assert.equal(identity.zIndexOffset, 1000)
     assert.equal(controls, 1)
     homes.remove() // Leaflet's native layer control toggles membership only.
@@ -266,6 +269,7 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     props = { ...props, highlightedGroupId: null }
     harness.render(() => PlanningMapLayers(props))
     assert.equal(links.children[8].style.opacity, 0.55)
+    assert.equal(links.children[8].tooltip, null)
     assert.equal(links.children.length, 9) // Highlighting never rebuilds or duplicates overlays.
     assert.equal(controls, 1)
     const limited = planFtth(input, 8, 100)

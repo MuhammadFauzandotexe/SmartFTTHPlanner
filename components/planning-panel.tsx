@@ -21,6 +21,8 @@ type Props = {
 }
 export function PlanningPanel({ plan, selectedGroupId, highlightedGroupId, onHighlightGroup, onHoverGroup, hasData, importing, onRun, onSelectGroup, resultsOpen, onResultsOpenChange }: Props) {
   const selected = plan?.groups.find(group => group.id === selectedGroupId)
+  const drops = selected?.candidate?.connections.filter(connection => selected.homes.some(home => home.id === connection.homeId) && Number.isFinite(connection.distanceMeters)) || []
+  const formatMeters = (meters: number) => `${meters.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m`
   const selectedDetail = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (selected && resultsOpen) selectedDetail.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
@@ -43,10 +45,20 @@ export function PlanningPanel({ plan, selectedGroupId, highlightedGroupId, onHig
         {selected.candidate ? <>
           <p>Kandidat: <b>{selected.candidate.id}</b></p>
           <p className="break-all">Tiang: {selected.candidate.pole.name}<br />ID tiang: {selected.candidate.pole.sourceId}</p>
-          <p>Total panjang/jarak yang diperiksa: <b>{selected.candidate.totalDistanceMeters.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m</b></p>
+          <div className="rounded-md bg-emerald-50 p-2 text-emerald-900">
+            <h4 className="font-semibold">Perkiraan kabel drop cluster</h4>
+            <p>Total panjang/jarak drop: <b>{formatMeters(drops.reduce((sum, drop) => sum + drop.distanceMeters, 0))}</b></p>
+            <p>Drop terjauh: <b>{drops.length ? formatMeters(Math.max(...drops.map(drop => drop.distanceMeters))) : "—"}</b> · Batas {formatMeters(plan!.maxDropLengthMeters)}</p>
+            <p className="mt-1 text-[10px]">Estimasi jarak lurus belum termasuk slack/allowance dan belum memvalidasi lintasan pemasangan. Metode jalur terverifikasi ditandai per rumah. Garis peta adalah hubungan layanan, bukan jalur kabel aktual.</p>
+          </div>
         </> : <p>Kandidat FAT: <b>—</b></p>}
         <h4 className="font-semibold">Rumah yang direncanakan dilayani</h4>
-        <ul className="max-h-44 space-y-2 overflow-y-auto">{selected.homes.map(home => <li key={home.id} className="break-all"><b>{home.name}</b> · ID {home.sourceId}{selected.candidate && <span className="block text-slate-500">{selected.candidate.connections.find(connection => connection.homeId === home.id)?.method === "route" ? "Panjang jalur terverifikasi" : "Estimasi jarak lurus"}: {selected.candidate.connections.find(connection => connection.homeId === home.id)?.distanceMeters.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m</span>}</li>)}</ul>
+        <ul className="max-h-60 space-y-2 overflow-y-auto" aria-label="Estimasi drop tiap rumah">{selected.homes.map(home => {
+          const drop = drops.find(connection => connection.homeId === home.id)
+          return <li key={home.id} className="break-all rounded border p-2"><b>{home.name}</b> · ID {home.sourceId}
+            {selected.candidate && <><p>Rumah ↔ {selected.candidate.id}</p><p className="font-semibold text-emerald-800">{drop?.method === "route" ? "Drop jalur terverifikasi" : "Estimasi drop (jarak lurus)"}: {drop ? formatMeters(drop.distanceMeters) : "Belum tersedia"}</p></>}
+          </li>
+        })}</ul>
       </div>}
     </ControlSection>}
   </section>

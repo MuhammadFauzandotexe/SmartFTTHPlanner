@@ -17,7 +17,7 @@ type Props = {
 type Overlays = { homes: L.FeatureGroup; fats: L.FeatureGroup; links: L.FeatureGroup }
 type Highlight = {
   rings: { layer: L.CircleMarker; group: HomeGroup }[]
-  links: { layer: L.Polyline; group: HomeGroup }[]
+  links: { layer: L.Polyline; group: HomeGroup; dropLabel: string }[]
   identities: { layer: L.Marker; group: HomeGroup; element: HTMLElement }[]
   fats: { layer: L.Marker; groups: HomeGroup[]; element: HTMLElement }[]
 }
@@ -69,7 +69,9 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
             pane: "planning-links", color: group.color, weight: 1.5, opacity: 0.65, dashArray: "5 6", interactive: false,
           })
           layers.links.addLayer(link)
-          highlight.current.links.push({ layer: link, group })
+          const drop = group.candidate.connections.find(connection => connection.homeId === home.id)
+          const length = drop && Number.isFinite(drop.distanceMeters) ? `${drop.distanceMeters.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m` : "belum tersedia"
+          highlight.current.links.push({ layer: link, group, dropLabel: length })
         }
       }
       // A permanent group identity works for single homes and collinear groups too.
@@ -158,10 +160,14 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
       layer.setStyle({ weight: active ? 4 : dimmed ? 1 : 2, opacity: dimmed ? 0.2 : 1, fillOpacity: active ? 0.3 : dimmed ? 0.025 : 0.15 })
       if (active) layer.bringToFront()
     }
-    for (const { layer, group } of highlight.current.links) {
+    for (const { layer, group, dropLabel } of highlight.current.links) {
       const active = group.id === highlightedGroupId
       layer.setStyle({ weight: active ? 4 : 1.5, opacity: active ? 1 : focused ? 0.12 : 0.55 })
-      if (active) layer.bringToFront()
+      layer.unbindTooltip()
+      if (active) {
+        layer.bindTooltip(text(dropLabel), { permanent: true, direction: "center", opacity: 0.95 })
+        layer.bringToFront()
+      }
     }
     for (const { layer, group, element } of highlight.current.identities) {
       const active = group.id === highlightedGroupId
