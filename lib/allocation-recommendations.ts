@@ -1,4 +1,4 @@
-import { extractPlanningInputs, planningDistance, type FtthPlan, type HomeGroup, type PlanningPoint } from "./ftth-planning"
+import { DEFAULT_MAX_FATS_PER_POLE, validateMaxFatsPerPole, validateFatPorts, extractPlanningInputs, planningDistance, type FtthPlan, type HomeGroup, type PlanningPoint } from "./ftth-planning"
 import { validGeometry, type FeatureItem } from "./survey"
 
 export type ReasonCode = "CAPACITY_UNAVAILABLE" | "DROP_LIMIT_EXCEEDED" | "NO_ALLOWED_PATH" | "INSUFFICIENT_DATA"
@@ -42,7 +42,7 @@ export const pathKey = (homeId: string, poleId: string) => JSON.stringify([homeI
 const geometry = (p: PlanningPoint) => [p.id, p.coordinates]
 // Exact canonical strings avoid hash collisions and exclude names and display metadata.
 export function inputRevision(ctx: AllocationContext): string {
-  return JSON.stringify({ manualRevision: ctx.plan.manualRevision || 0, maxDrop: ctx.plan.maxDropLengthMeters, ports: ctx.plan.fatPorts,
+  return JSON.stringify({ manualRevision: ctx.plan.manualRevision || 0, maxFatsPerPole: ctx.plan.maxFatsPerPole ?? DEFAULT_MAX_FATS_PER_POLE, maxDrop: ctx.plan.maxDropLengthMeters, ports: ctx.plan.fatPorts,
     homes: [...ctx.plan.groups.flatMap(g => g.homes), ...ctx.plan.unservedHomes.map(h => h.home)].sort((a,b) => cmp(a.id,b.id)).map(geometry),
     poles: [...ctx.poles].sort((a,b) => cmp(a.id,b.id)).map(geometry),
     fats: [...(ctx.surveyFats || [])].sort((a,b) => cmp(a.id,b.id)).map(geometry),
@@ -110,6 +110,7 @@ export function checkProposal(ctx: AllocationContext, proposal: Proposal, reserv
     if (pole?.upstream !== "yes" && !v?.upstream) missing.push("Akses dan kapasitas distribusi/upstream")
     const maxFats = pole?.maxFats ?? v?.maxFats
     const devices = prepared.allTargets.filter(t => t.type === "ASSIGN_EXISTING_FAT" && (t.pole.id === target.pole.id || planningDistance(t.pole, target.pole) < 0.1)).length
+    if (devices + 1 > (ctx.plan.maxFatsPerPole ?? DEFAULT_MAX_FATS_PER_POLE)) reject("CAPACITY_UNAVAILABLE")
     if (maxFats === undefined) missing.push("Batas jumlah FAT pada tiang")
     else if (!Number.isInteger(maxFats) || devices + 1 > maxFats) reject("CAPACITY_UNAVAILABLE")
   }
@@ -297,8 +298,36 @@ export function connectHomeToFat(ctx: AllocationContext, state: AllocationState,
   const manualRevision = Math.max(plan.manualRevision||0,state.manualRevision||0)+1
   return {plan:{...plan,manualRevision,groups:plan.groups.map(g=>g.id===groupId?group:g),unservedHomes:plan.unservedHomes.filter(h=>h.home.id!==homeId)},state:{...state,manualRevision,detachedHomeIds:state.detachedHomeIds?.filter(id=>id!==homeId),locks:[...state.locks.filter(l=>l.group.id!==groupId),lock]}}
 }
+/** Survey FATs are counted only when explicitly colocated (same ID or within 0.1 m), never by nearest pole. */
+export function countFatsOnPole(ctx: AllocationContext, pole: PlanningPoint): number {
+  return new Set(targets(ctx).filter(t=>t.type==="ASSIGN_EXISTING_FAT" && (t.pole.id===pole.id || planningDistance(t.pole,pole)<0.1)).map(t=>t.id)).size
+}
+export function installFatOnPole(ctx: AllocationContext, state: AllocationState, poleId: string): {plan: FtthPlan; state: AllocationState; group: HomeGroup} {
+  const plan=ctx.plan, limit=validateMaxFatsPerPole(plan.maxFatsPerPole??DEFAULT_MAX_FATS_PER_POLE)
+  const pole=ctx.poles.find(p=>p.id===poleId)
+  if(!pole) throw new Error("Tiang tidak tersedia atau koordinatnya tidak valid.")
+  const rules=ctx.poleEvidence?.[poleId]
+  if(rules?.installation==="no" || rules?.upstream==="no") throw new Error("Pemasangan FAT pada tiang ini diketahui tidak diizinkan.")
+  const effectiveLimit=Math.min(limit,rules?.maxFats??limit)
+  const count=countFatsOnPole(ctx,pole)
+  if(count>=effectiveLimit) throw new Error(`Tiang ${pole.name} sudah memiliki ${count} FAT; batas ${effectiveLimit} FAT per tiang. Pilih tiang lain.`)
+  const capacity=validateFatPorts(plan.fatPorts)
+  let manualRevision=Math.max(plan.manualRevision||0,state.manualRevision||0)+1
+  while(plan.groups.some(g=>g.id===`M${String(manualRevision).padStart(3,"0")}` || g.candidate?.id===`FAT-M${String(manualRevision).padStart(3,"0")}`)) manualRevision++
+  const id=`M${String(manualRevision).padStart(3,"0")}`
+  const group:HomeGroup={id,color:"#047857",homes:[],capacity,locked:true,candidate:{id:`FAT-${id}`,pole,connections:[],totalDistanceMeters:0}}
+  const lock:LockedDesign={group,proposalId:`MANUAL-INSTALL:${id}`,geometryRevision:JSON.stringify([pole.id,pole.coordinates]),verification:{paths:{},installation:false,upstream:false,capacityConfirmed:false,note:`FAT ditambahkan manual dalam simulasi pada ${pole.name}; ${capacity} port, ${count+1}/${limit} FAT per tiang. Pemasangan lapangan dan upstream belum diverifikasi.`}}
+  return {group,plan:{...plan,maxFatsPerPole:limit,manualRevision,groups:[...plan.groups,group]},state:{...state,manualRevision,locks:[...state.locks,lock]}}
+}
 export function lockedDesignIssues(ctx: AllocationContext, locks: LockedDesign[]): string[] {
   const messages:string[]=[]
+  const checkedPoles=new Set<string>()
+  for(const group of ctx.plan.groups) if(group.candidate && !checkedPoles.has(group.candidate.pole.id)) {
+    const pole=group.candidate.pole
+    checkedPoles.add(pole.id)
+    const count=countFatsOnPole(ctx,pole), limit=ctx.plan.maxFatsPerPole??DEFAULT_MAX_FATS_PER_POLE
+    if(count>limit) messages.push(`${pole.name}: ${count} FAT melebihi batas konfigurasi ${limit}; rancangan lama dipertahankan dan perlu ditinjau.`)
+  }
   for(const {group,verification} of locks) {
     if (ctx.sourceGeometry) for (const p of [...group.homes, ...(group.candidate ? [group.candidate.pole] : [])]) {
       if (JSON.stringify(ctx.sourceGeometry[p.id]) !== JSON.stringify(p.coordinates)) messages.push(`${p.name}: geometri sumber berubah/hilang; verifikasi desain terkunci perlu ditinjau`)

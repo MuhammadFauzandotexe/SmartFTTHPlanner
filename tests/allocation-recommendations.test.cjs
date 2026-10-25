@@ -284,3 +284,47 @@ test('manual assignment uses allowed route length when present and persists thro
   assert.equal(recomputed.groups.flatMap(g=>g.homes).filter(h=>h.id===home.id).length,1)
   assert(!recomputed.unservedHomes.some(item=>item.home.id===home.id))
 })
+
+test('manual FAT installation honors default two per pole, preserving survey and zero home allocation',()=>{
+  let ctx=context({poles:[pole,other]}),state=a.emptyAllocations()
+  const before=JSON.stringify(ctx)
+  const one=a.installFatOnPole(ctx,state,pole.id)
+  assert.equal(one.group.capacity,8);assert.equal(one.group.homes.length,0)
+  assert.equal(one.plan.unservedHomes.length,1);assert.equal(JSON.stringify(ctx),before)
+  assert.equal(one.state.locks[0].verification.installation,false)
+  ctx={...ctx,plan:one.plan};state=one.state
+  const two=a.installFatOnPole(ctx,state,pole.id)
+  ctx={...ctx,plan:two.plan};state=two.state
+  assert.equal(a.countFatsOnPole(ctx,pole),2)
+  assert.throws(()=>a.installFatOnPole(ctx,state,pole.id),/batas 2/)
+  assert.equal(a.installFatOnPole(ctx,state,other.id).plan.groups.length,3)
+  assert.equal(a.preserveLockedDesigns(context().plan,state.locks).groups.length,2)
+})
+test('manual FAT count includes survey devices and does not duplicate a survey FAT already represented',()=>{
+  const ctx=context({poles:[pole]});ctx.surveyFats=[{...pole,id:'survey'}]
+  assert.equal(a.countFatsOnPole(ctx,pole),1)
+  ctx.plan.groups=[{...group('SURVEY-FAT:survey',[],8)}]
+  assert.equal(a.countFatsOnPole(ctx,pole),1)
+  const added=a.installFatOnPole(ctx,a.emptyAllocations(),pole.id)
+  assert.throws(()=>a.installFatOnPole({...ctx,plan:added.plan},added.state,pole.id),/batas 2/)
+})
+test('FAT per pole config only accepts integer 1 to 10 and can reach ten without exceeding it',()=>{
+  const {validateMaxFatsPerPole}=require('../lib/ftth-planning.ts')
+  for(const value of [0,-1,11,2.5,NaN,Infinity,'2',null]) assert.throws(()=>validateMaxFatsPerPole(value),RangeError)
+  assert.equal(validateMaxFatsPerPole(1),1);assert.equal(validateMaxFatsPerPole(10),10)
+  let ctx=context({poles:[pole]}),state=a.emptyAllocations();ctx.plan.maxFatsPerPole=10
+  for(let i=0;i<10;i++){const next=a.installFatOnPole(ctx,state,pole.id);ctx={...ctx,plan:next.plan};state=next.state}
+  assert.equal(new Set(ctx.plan.groups.map(g=>g.candidate.id)).size,10)
+  assert.throws(()=>a.installFatOnPole(ctx,state,pole.id),/batas 10/)
+  const lower={...ctx,plan:{...ctx.plan,maxFatsPerPole:2}}
+  assert(a.lockedDesignIssues(lower,state.locks).some(message=>message.includes('10 FAT melebihi')))
+  assert.equal(lower.plan.groups.length,10)
+})
+test('manual FAT placement and recommendation approval share the configured device limit',()=>{
+  const ctx=context({groups:[group('one'),group('two')],poles:[pole]})
+  assert.throws(()=>a.installFatOnPole(ctx,a.emptyAllocations(),pole.id),/batas 2/)
+  const target=a.targets(ctx).find(t=>t.type==='ADD_FAT_ON_EXISTING_POLE')
+  const proposal=verify(a.makeProposal(ctx,target,[home]));proposal.verification.maxFats=10
+  assert(a.checkProposal(ctx,proposal).reasons.includes('CAPACITY_UNAVAILABLE'))
+  assert.throws(()=>a.installFatOnPole(ctx,a.emptyAllocations(),'missing'),/Tiang tidak tersedia/)
+})

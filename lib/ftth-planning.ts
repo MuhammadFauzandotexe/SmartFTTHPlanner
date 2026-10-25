@@ -1,6 +1,12 @@
 import { distance, point } from "@turf/turf"
 import { validGeometry, type FeatureItem } from "./survey"
 
+export const DEFAULT_MAX_FATS_PER_POLE = 2
+export const MAX_FATS_PER_POLE = 10
+export function validateMaxFatsPerPole(value: number): number {
+  if (!Number.isInteger(value) || value < 1 || value > MAX_FATS_PER_POLE) throw new RangeError(`Maksimum FAT per tiang harus bilangan bulat 1–${MAX_FATS_PER_POLE}.`)
+  return value
+}
 export const DEFAULT_FAT_PORTS = 8
 export const DEFAULT_MAX_DROP_LENGTH_METERS = 50
 export function validateMaxDropLengthMeters(value: number): number {
@@ -30,6 +36,7 @@ export type FatCandidate = {
 export type HomeGroup = { capacity?: number; occupiedPorts?: number; locked?: boolean; id: string; color: string; homes: PlanningPoint[]; candidate: FatCandidate | null }
 export type PlanningIssue = { id: string; name: string; reason: string }
 export type FtthPlan = {
+  maxFatsPerPole?: number
   manualRevision?: number
   fatPorts: number
   maxDropLengthMeters: number

@@ -49,7 +49,7 @@ export function AllocationPanel({context:ctx,state,onChange,onAccept,onFocus,iss
     <h3 className="text-xs font-semibold">Rekomendasi alokasi</h3>
     <p>{ctx.plan.unservedHomes.length} rumah belum terlayani · {eligible.length} usulan pending · {pendingHomes.size} rumah diusulkan</p>
     <p>Usulan bukan rancangan aktif. Kapasitas FAT baru mengikuti konfigurasi eksplisit: <b>{ctx.plan.fatPorts} port</b>. Keputusan tersimpan selama sesi ini.</p>
-    {!!issues.length && <div role="alert" className="rounded border border-red-300 bg-red-50 p-2"><b>Masalah desain terkunci</b><ul>{issues.map((s,i)=><li key={i}>{s}</li>)}</ul><p>Desain dipertahankan; perlu peninjauan engineer, bukan dihapus otomatis.</p></div>}
+    {!!issues.length && <div role="alert" className="rounded border border-red-300 bg-red-50 p-2"><b>Masalah rancangan</b><ul>{issues.map((s,i)=><li key={i}>{s}</li>)}</ul><p>Desain dipertahankan; perlu peninjauan engineer, bukan dihapus otomatis.</p></div>}
     {!allTargets.length && <p>Data belum cukup: tambahkan titik tiang atau FAT melalui impor survei untuk rencana manual.</p>}
     <div className="flex flex-wrap gap-1">
       <Button size="sm" onClick={()=>act(()=>onChange(generateRecommendations(ctx,state)))}>Rekomendasikan Alokasi</Button>

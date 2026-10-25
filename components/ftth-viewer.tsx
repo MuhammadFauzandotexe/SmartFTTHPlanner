@@ -11,9 +11,9 @@ import { useApplicationLog } from "@/hooks/use-application-log"
 import { importResultLogs, planningResultLogs, type LogInput } from "@/lib/application-log"
 import { ControlSection } from "@/components/control-section"
 import { AllocationPanel } from "@/components/allocation-panel"
-import { acceptProposal, connectHomeToFat, disconnectHome, allocationContext, inputRevision, emptyAllocations, lockedDesignIssues, preserveLockedDesigns, type AllocationState, type Proposal } from "@/lib/allocation-recommendations"
+import { acceptProposal, installFatOnPole, connectHomeToFat, disconnectHome, allocationContext, inputRevision, emptyAllocations, lockedDesignIssues, preserveLockedDesigns, type AllocationState, type Proposal } from "@/lib/allocation-recommendations"
 import { PlanningPanel } from "@/components/planning-panel"
-import { planFtth, extractPlanningInputs, validateMaxDropLengthMeters, DEFAULT_MAX_DROP_LENGTH_METERS, validateFatPorts, DEFAULT_FAT_PORTS, MAX_FAT_PORTS, type FtthPlan } from "@/lib/ftth-planning"
+import { DEFAULT_MAX_FATS_PER_POLE, MAX_FATS_PER_POLE, validateMaxFatsPerPole, planFtth, extractPlanningInputs, validateMaxDropLengthMeters, DEFAULT_MAX_DROP_LENGTH_METERS, validateFatPorts, DEFAULT_FAT_PORTS, MAX_FAT_PORTS, type FtthPlan } from "@/lib/ftth-planning"
 import { LayerSettingsPanel } from "@/components/layer-settings"
 import { useLayerSettings } from "@/hooks/use-layer-settings"
 import { baseMaps } from "@/lib/layer-settings"
@@ -37,8 +37,11 @@ export default function FtthViewer() {
   const [layerSettingsOpen, setLayerSettingsOpen] = useState(false)
   const layerSettingsButton = useRef<HTMLButtonElement>(null)
   const [maxDropLengthMeters, setMaxDropLengthMeters] = useState(DEFAULT_MAX_DROP_LENGTH_METERS)
+  const [maxFatsPerPole, setMaxFatsPerPole] = useState(DEFAULT_MAX_FATS_PER_POLE)
+  const [addingFat, setAddingFat] = useState(false)
+  const [placementError, setPlacementError] = useState("")
   const [fatPorts, setFatPorts] = useState(DEFAULT_FAT_PORTS)
-  const [sections, setSections] = useState({ data: false, configuration: true, planning: true, layers: false, display: false })
+  const [sections, setSections] = useState({ data: false, configuration: true, planning: true, component: false, layers: false, display: false })
   const [resultsOpen, setResultsOpen] = useState(false)
   const setSection = useCallback((key: keyof typeof sections, open: boolean) => setSections(previous => ({ ...previous, [key]: open })), [])
   const [features, setFeatures] = useState<FeatureItem[]>([])
@@ -46,12 +49,18 @@ export default function FtthViewer() {
   const [allocations, setAllocations] = useState<AllocationState>(emptyAllocations)
   const [focusedProposal, setFocusedProposal] = useState<Proposal | null>(null)
   const plan = useMemo(() => {
-    if (planning?.source === features) return planning.result
+    if (planning?.source === features) return planning.result.maxFatsPerPole===maxFatsPerPole ? planning.result : {...planning.result,maxFatsPerPole}
     if (!allocations.locks.length) return null
     const inputs = extractPlanningInputs(features)
-    return preserveLockedDesigns({ fatPorts, maxDropLengthMeters, distanceMethod: "straight-line", groups: [], homeCount: inputs.homes.length, poleCount: inputs.poles.length, issues: inputs.issues, warnings: ["Hasil otomatis perlu dihitung ulang; desain engineer terkunci dipertahankan."], unservedHomes: inputs.homes.map(home => ({ home, reason: "Hasil otomatis perlu dihitung ulang." })) }, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision)
-  }, [planning, features, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, fatPorts, maxDropLengthMeters])
+    return preserveLockedDesigns({ maxFatsPerPole, fatPorts, maxDropLengthMeters, distanceMethod: "straight-line", groups: [], homeCount: inputs.homes.length, poleCount: inputs.poles.length, issues: inputs.issues, warnings: ["Hasil otomatis perlu dihitung ulang; desain engineer terkunci dipertahankan."], unservedHomes: inputs.homes.map(home => ({ home, reason: "Hasil otomatis perlu dihitung ulang." })) }, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision)
+  }, [planning, features, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, fatPorts, maxDropLengthMeters, maxFatsPerPole])
   const recommendationContext = useMemo(() => plan ? allocationContext(plan, features) : null, [plan, features])
+  const placementContext = useMemo(()=>{
+    if (!addingFat) return null
+    if (plan) return allocationContext(plan,features)
+    const inputs=extractPlanningInputs(features)
+    return allocationContext({maxFatsPerPole,fatPorts,maxDropLengthMeters,distanceMethod:"straight-line",groups:[],homeCount:inputs.homes.length,poleCount:inputs.poles.length,issues:inputs.issues,warnings:["Rancangan manual; pengelompokan otomatis belum dijalankan."],unservedHomes:inputs.homes.map(home=>({home,reason:"Belum dialokasikan dalam rancangan manual."}))},features)
+  },[addingFat,plan,features,maxFatsPerPole,fatPorts,maxDropLengthMeters])
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
   const [highlightedGroupId, setHighlightedGroupId] = useState<string | null>(null)
   const [hoveredGroupId, setHoveredGroupId] = useState<string | null>(null)
@@ -104,6 +113,7 @@ export default function FtthViewer() {
   const importFiles = useCallback(async (files: FileList | File[]) => {
     const selectedFiles = Array.from(files)
     if (!selectedFiles.length) return
+    setAddingFat(false)
     setImporting(true)
     setPlanning(null)
     setResultsOpen(false)
@@ -183,7 +193,7 @@ export default function FtthViewer() {
   const runPlanning = useCallback(() => {
     if (importing || !features.length) return
     try {
-      const result = preserveLockedDesigns(planFtth(features, fatPorts, maxDropLengthMeters), allocations.locks, allocations.detachedHomeIds, allocations.manualRevision)
+      const result = {...preserveLockedDesigns(planFtth(features, fatPorts, maxDropLengthMeters), allocations.locks, allocations.detachedHomeIds, allocations.manualRevision),maxFatsPerPole}
       setPlanning({ source: features, result })
       setResultsOpen(true)
       setSection("planning", true)
@@ -197,7 +207,7 @@ export default function FtthViewer() {
     } catch (error) {
       addLogs([{ level: "error", source: "Perencanaan", title: "Perencanaan awal gagal dijalankan", details: [{ label: "Penyebab", value: error instanceof Error ? error.message : "Perhitungan gagal." }] }])
     }
-  }, [features, map, importing, addLogs, fatPorts, maxDropLengthMeters, setSection, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision])
+  }, [features, map, importing, addLogs, fatPorts, maxDropLengthMeters, setSection, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, maxFatsPerPole])
   const selectPlanningGroup = useCallback((id: string) => {
     const group = plan?.groups.find(item => item.id === id)
     if (!group) return
@@ -265,6 +275,7 @@ export default function FtthViewer() {
   }, [plan, allocations, features, addLogs])
   const beginFatSelection = () => {
     if (!selectedUnserved || !recommendationContext || importing) return
+    setAddingFat(false)
     setConnectionError("")
     setConnectionSelection({homeId:selectedUnserved.home.id,revision:inputRevision(recommendationContext)})
     setFocusedProposal(null)
@@ -288,6 +299,32 @@ export default function FtthViewer() {
       setConnectionError(error instanceof Error?error.message:"Penyambungan rumah gagal.")
     }
   },[selectingHome,recommendationContext,allocations,features,importing,addLogs,setSection])
+  const beginFatPlacement = () => {
+    if (importing) return
+    setAddingFat(true)
+    setPlacementError("")
+    setConnectionSelection(null)
+    setConnectionError("")
+    setFocusedProposal(null)
+    setHoveredGroupId(null)
+    setSelected(null)
+    setLayerSettingsOpen(false)
+  }
+  const pickPoleForFat = useCallback((poleId: string) => {
+    if (!addingFat || !placementContext || importing) return
+    try {
+      const next=installFatOnPole(placementContext,allocations,poleId)
+      setPlanning({source:features,result:next.plan})
+      setAllocations(next.state)
+      setAddingFat(false)
+      setPlacementError("")
+      setSelectedGroupId(next.group.id)
+      setHighlightedGroupId(next.group.id)
+      setResultsOpen(true)
+      setSection("planning",true)
+      addLogs([{level:"success",source:"Component",title:"FAT manual ditambahkan",details:[{label:"FAT",value:next.group.candidate!.id},{label:"Tiang",value:next.group.candidate!.pole.name},{label:"Kapasitas",value:`${next.group.capacity} port; penambahan simulasi, pemasangan/upstream belum diverifikasi.`}]}])
+    } catch(error) {setPlacementError(error instanceof Error?error.message:"Penambahan FAT gagal.")}
+  },[addingFat,placementContext,allocations,features,importing,addLogs,setSection])
   const nearestPole = selected?.category === "Rumah" && selected.kind === "Point" ? features.filter(f => f.category === "Tiang" && f.kind === "Point").map(f => ({ f, d: distance(point([selected.coords[1], selected.coords[0]]), point([f.coords[1], f.coords[0]]), { units: "meters" }) })).sort((a, b) => a.d - b.d)[0] : null
   const measureTotal = measurePoints.length > 1 ? measurePoints.slice(1).reduce((sum, p, i) => sum + distance(point([measurePoints[i][1], measurePoints[i][0]]), point([p[1], p[0]]), { units: "meters" }), 0) : 0
 
@@ -319,10 +356,25 @@ export default function FtthViewer() {
               setHoveredGroupId(null)
             }} />
             <p className="text-[11px] text-slate-500">50 m adalah nilai awal demo yang dapat diubah, bukan standar teknis. Konfigurasi selama sesi; perubahan menghapus hasil otomatis. Desain engineer terkunci dipertahankan dengan masalah bila tidak sesuai. Hitung ulang manual.</p>
+            <label htmlFor="max-fats-per-pole" className="block text-xs font-medium">Maksimum FAT per tiang</label>
+            <select id="max-fats-per-pole" value={maxFatsPerPole} disabled={importing} onChange={event=>{
+              const value=Number(event.target.value)
+              try {validateMaxFatsPerPole(value)} catch {return}
+              setMaxFatsPerPole(value)
+              setPlanning(previous=>previous?{...previous,result:{...previous.result,maxFatsPerPole:value}}:previous)
+              setPlacementError("")
+            }} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs">
+              {Array.from({length:MAX_FATS_PER_POLE},(_,index)=>index+1).map(value=><option key={value} value={value}>{value} FAT{value===DEFAULT_MAX_FATS_PER_POLE?" (default)":""}</option>)}
+            </select>
+            <p className="text-[11px] text-slate-500">Batas penambahan FAT: 1–10 per tiang, default 2. FAT lama dipertahankan jika batas diturunkan; periksa masalah rancangan.</p>
             <label htmlFor="fat-port-count" className="block text-xs font-medium">Jumlah port FAT</label>
             <select id="fat-port-count" value={fatPorts} disabled={importing} onChange={event => changeFatPorts(Number(event.target.value))} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
               {Array.from({ length: MAX_FAT_PORTS }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} port{value === DEFAULT_FAT_PORTS ? " (default)" : ""}</option>)}
             </select>
+          </ControlSection>
+          <ControlSection title="Component" icon={<Cable className="size-4" />} caption="Tambah" open={sections.component} onOpenChange={open=>setSection("component",open)}>
+            <Button size="sm" variant={addingFat?"default":"outline"} disabled={importing||!features.some(feature=>feature.category==="Tiang")} onClick={beginFatPlacement}>FAT</Button>
+            <p className="text-[11px] text-slate-500">Pilih FAT, lalu klik tiang pada peta. Kapasitas FAT baru mengikuti konfigurasi port ({fatPorts} port).</p>
           </ControlSection>
           <ControlSection title="Perencanaan FTTH" icon={<Network className="size-4" />} caption={plan ? `${plan.groups.length} kelompok` : "Manual"} open={sections.planning} onOpenChange={open => setSection("planning", open)}>
             <PlanningPanel plan={plan} selectedGroupId={selectedGroupId} highlightedGroupId={activeHighlight} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} hasData={features.length > 0} importing={importing} onRun={runPlanning} onSelectGroup={selectPlanningGroup} resultsOpen={resultsOpen} onResultsOpenChange={setResultsOpen} />
@@ -339,7 +391,7 @@ export default function FtthViewer() {
           </ControlSection>
         </div>
       </aside>}
-      <main className="relative min-w-0 flex-1"><MapView features={visible} onSelect={selectSurveyObject} showLabels={showLabels} onReady={setMap} settings={settings} plan={plan} selectingHome={selectingHome} onPickFat={pickFat} provisional={focusedProposal && focusedProposal.decision === "pending" && recommendationContext && focusedProposal.revision === inputRevision(recommendationContext) ? focusedProposal : null} onSelectProposal={focusProposal} highlightedGroupId={activeHighlight} onSelectGroup={selectPlanningGroup} onSelectHome={selectPlannedHome} onDisconnectHome={disconnectPlannedHome} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} />{selectingHome && <section aria-label="Pilih FAT untuk rumah" className="absolute bottom-4 left-4 z-[650] w-[min(360px,calc(100%-2rem))] space-y-2 rounded-xl border bg-white p-3 text-xs shadow-lg"><h2 className="font-semibold">Sambungkan {selectingHome.name} ke FAT</h2><p>Klik FAT dengan port tersedia. Rumah lain, cluster dan FAT penuh disembunyikan sementara.</p><p>Estimasi jarak lurus · batas drop {plan?.maxDropLengthMeters} m. Lintasan pemasangan belum tervalidasi.</p>{!plan?.groups.some(g=>g.candidate&&g.homes.length+(g.occupiedPorts||0)<(g.capacity??plan.fatPorts))&&<p role="status">Tidak ada FAT dengan port tersedia. Batalkan untuk kembali ke peta.</p>}{connectionError&&<p role="alert" className="text-red-700">{connectionError}</p>}<Button size="sm" variant="outline" onClick={()=>{setConnectionSelection(null);setConnectionError("")}}>Batal memilih FAT</Button></section>}{!features.length && <div role="status" className="pointer-events-none absolute bottom-4 left-4 right-4 z-[500] rounded-lg border bg-white/95 p-4 text-center text-sm shadow-sm"><p className="font-semibold">Belum ada data survei</p><p className="mt-1 text-xs text-slate-500">Klik Impor Data untuk memuat file KML atau KMZ Anda.</p></div>}<div className="absolute left-4 top-4 z-[500] flex flex-col gap-1"><Button size="icon" variant="secondary" onClick={() => map?.zoomIn()} aria-label="Perbesar">+</Button><Button size="icon" variant="secondary" onClick={() => map?.zoomOut()} aria-label="Perkecil">−</Button></div>{collapsed && <Button className="absolute bottom-24 left-4 z-[500]" variant="secondary" size="icon" onClick={() => setCollapsed(false)} aria-label="Buka sidebar"><ChevronRight /></Button>}<div className="absolute right-2 top-4 z-[700] flex flex-wrap justify-end gap-2 sm:right-4"><Button ref={layerSettingsButton} size="sm" variant="secondary" disabled={!settingsReady} aria-expanded={layerSettingsOpen} aria-controls="layer-settings-panel" onClick={() => setLayerSettingsOpen(open => !open)}><Layers3 /> Layer Settings</Button><Button size="sm" variant="secondary" onClick={() => { setMeasureMode(true); addLogs([{ level: "warning", source: "Peta", title: "Mode ukur jarak belum lengkap", details: [{ label: "Status", value: "Pengumpulan titik klik peta belum tersambung. Belum ada hasil pengukuran yang dihitung." }] }]) }}><Ruler data-icon="inline-start" /> Ukur Jarak</Button><Button size="sm" variant="secondary" disabled={!features.length} onClick={fitData}><Crosshair data-icon="inline-start" /> Fit</Button></div>{layerSettingsOpen && <LayerSettingsPanel settings={settings} features={features} onChange={setSettings} onClose={() => { setLayerSettingsOpen(false); layerSettingsButton.current?.focus() }} />}{!selectingHome && selected && (settings.layers[selected.category].visible || plan?.groups.some(group => group.homes.some(home => home.id === selected.id)) || plan?.unservedHomes.some(item => item.home.id === selected.id)) && <section aria-label="Informasi objek survei" className="absolute bottom-4 right-4 z-[500] max-h-[calc(100%-6rem)] w-[310px] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl"><div className="flex items-start justify-between"><div><Badge style={{ backgroundColor: colors[selected.category], color: "white" }}>{selected.category}</Badge><h2 className="mt-2 text-sm font-bold">{selected.name}</h2><p className="mt-1 font-mono text-[10px] text-slate-400">ID: {selected.id}</p></div><Button variant="ghost" size="icon" onClick={() => setSelected(null)}><X /></Button></div><Separator className="my-3" />{selectedUnserved && <div className="mb-3 space-y-2 rounded border bg-emerald-50 p-2 text-xs"><p>Rumah belum memiliki layanan FAT / cluster.</p><Button size="sm" disabled={importing} onClick={beginFatSelection}>Sambungkan ke FAT</Button>{connectionError && <p role="alert" className="text-red-700">{connectionError}</p>}</div>}<div className="flex flex-col gap-2 text-xs"><div className="flex justify-between"><span className="text-slate-400">{selected.kind === "Point" ? "Latitude, Longitude" : "Titik awal (Lat, Lon)"}</span><span className="font-mono">{selected.coords[0].toFixed(6)}, {selected.coords[1].toFixed(6)} <button onClick={() => navigator.clipboard.writeText(`${selected.coords[0]}, ${selected.coords[1]}`)}><Copy className="inline size-3" /></button></span></div><div className="flex justify-between"><span className="text-slate-400">Sumber file</span><span>{selected.file}</span></div><div className="flex justify-between gap-2"><span className="text-slate-400">KML / Geometri</span><span className="break-all text-right">{selected.kmlFile} · {selected.kind}</span></div>{selected.props && Object.keys(selected.props).length > 0 && <details open className="mt-2 border-t pt-2"><summary className="cursor-pointer font-semibold">Atribut objek KMZ/KML</summary><dl className="mt-2 space-y-2">{Object.entries(selected.props).map(([key, value]) => <div key={key} className="rounded bg-slate-50 p-2"><dt className="break-all font-medium text-slate-500">{key}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{value === null || value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl></details>}{nearestPole && <div className="rounded-md bg-emerald-50 p-2 text-emerald-700">Tiang terdekat: <b>{nearestPole.f.name}</b><br />Jarak garis lurus: {nearestPole.d.toFixed(1)} m</div>}</div></section>}</main>
+      <main className="relative min-w-0 flex-1"><MapView features={addingFat ? features : visible} onSelect={selectSurveyObject} showLabels={showLabels} onReady={setMap} settings={settings} plan={plan} placementContext={placementContext} onPickPole={pickPoleForFat} selectingHome={selectingHome} onPickFat={pickFat} provisional={focusedProposal && focusedProposal.decision === "pending" && recommendationContext && focusedProposal.revision === inputRevision(recommendationContext) ? focusedProposal : null} onSelectProposal={focusProposal} highlightedGroupId={activeHighlight} onSelectGroup={selectPlanningGroup} onSelectHome={selectPlannedHome} onDisconnectHome={disconnectPlannedHome} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} />{addingFat && <section aria-label="Tambah FAT pada tiang" className="absolute bottom-4 left-4 z-[650] w-[min(360px,calc(100%-2rem))] space-y-2 rounded-xl border bg-white p-3 text-xs shadow-lg"><h2 className="font-semibold">Tambah FAT — pilih tiang</h2><p>Hanya tiang yang dapat diklik. Tiang hijau masih memiliki ruang; tiang kuning telah mencapai batas.</p><p>Maksimum {maxFatsPerPole} FAT per tiang · kapasitas FAT baru {fatPorts} port. Ini komponen simulasi; pemasangan dan upstream belum diverifikasi.</p>{!placementContext?.poles.length&&<p role="status">Tidak ada titik Tiang valid. Periksa data survei.</p>}{placementError&&<p role="alert" className="text-red-700">{placementError}</p>}<Button size="sm" variant="outline" onClick={()=>{setAddingFat(false);setPlacementError("")}}>Batal menambah FAT</Button></section>}{selectingHome && <section aria-label="Pilih FAT untuk rumah" className="absolute bottom-4 left-4 z-[650] w-[min(360px,calc(100%-2rem))] space-y-2 rounded-xl border bg-white p-3 text-xs shadow-lg"><h2 className="font-semibold">Sambungkan {selectingHome.name} ke FAT</h2><p>Klik FAT dengan port tersedia. Rumah lain, cluster dan FAT penuh disembunyikan sementara.</p><p>Estimasi jarak lurus · batas drop {plan?.maxDropLengthMeters} m. Lintasan pemasangan belum tervalidasi.</p>{!plan?.groups.some(g=>g.candidate&&g.homes.length+(g.occupiedPorts||0)<(g.capacity??plan.fatPorts))&&<p role="status">Tidak ada FAT dengan port tersedia. Batalkan untuk kembali ke peta.</p>}{connectionError&&<p role="alert" className="text-red-700">{connectionError}</p>}<Button size="sm" variant="outline" onClick={()=>{setConnectionSelection(null);setConnectionError("")}}>Batal memilih FAT</Button></section>}{!features.length && <div role="status" className="pointer-events-none absolute bottom-4 left-4 right-4 z-[500] rounded-lg border bg-white/95 p-4 text-center text-sm shadow-sm"><p className="font-semibold">Belum ada data survei</p><p className="mt-1 text-xs text-slate-500">Klik Impor Data untuk memuat file KML atau KMZ Anda.</p></div>}<div className="absolute left-4 top-4 z-[500] flex flex-col gap-1"><Button size="icon" variant="secondary" onClick={() => map?.zoomIn()} aria-label="Perbesar">+</Button><Button size="icon" variant="secondary" onClick={() => map?.zoomOut()} aria-label="Perkecil">−</Button></div>{collapsed && <Button className="absolute bottom-24 left-4 z-[500]" variant="secondary" size="icon" onClick={() => setCollapsed(false)} aria-label="Buka sidebar"><ChevronRight /></Button>}<div className="absolute right-2 top-4 z-[700] flex flex-wrap justify-end gap-2 sm:right-4"><Button ref={layerSettingsButton} size="sm" variant="secondary" disabled={!settingsReady} aria-expanded={layerSettingsOpen} aria-controls="layer-settings-panel" onClick={() => setLayerSettingsOpen(open => !open)}><Layers3 /> Layer Settings</Button><Button size="sm" variant="secondary" onClick={() => { setMeasureMode(true); addLogs([{ level: "warning", source: "Peta", title: "Mode ukur jarak belum lengkap", details: [{ label: "Status", value: "Pengumpulan titik klik peta belum tersambung. Belum ada hasil pengukuran yang dihitung." }] }]) }}><Ruler data-icon="inline-start" /> Ukur Jarak</Button><Button size="sm" variant="secondary" disabled={!features.length} onClick={fitData}><Crosshair data-icon="inline-start" /> Fit</Button></div>{layerSettingsOpen && <LayerSettingsPanel settings={settings} features={features} onChange={setSettings} onClose={() => { setLayerSettingsOpen(false); layerSettingsButton.current?.focus() }} />}{!addingFat && !selectingHome && selected && (settings.layers[selected.category].visible || plan?.groups.some(group => group.homes.some(home => home.id === selected.id)) || plan?.unservedHomes.some(item => item.home.id === selected.id)) && <section aria-label="Informasi objek survei" className="absolute bottom-4 right-4 z-[500] max-h-[calc(100%-6rem)] w-[310px] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl"><div className="flex items-start justify-between"><div><Badge style={{ backgroundColor: colors[selected.category], color: "white" }}>{selected.category}</Badge><h2 className="mt-2 text-sm font-bold">{selected.name}</h2><p className="mt-1 font-mono text-[10px] text-slate-400">ID: {selected.id}</p></div><Button variant="ghost" size="icon" onClick={() => setSelected(null)}><X /></Button></div><Separator className="my-3" />{selectedUnserved && <div className="mb-3 space-y-2 rounded border bg-emerald-50 p-2 text-xs"><p>Rumah belum memiliki layanan FAT / cluster.</p><Button size="sm" disabled={importing} onClick={beginFatSelection}>Sambungkan ke FAT</Button>{connectionError && <p role="alert" className="text-red-700">{connectionError}</p>}</div>}<div className="flex flex-col gap-2 text-xs"><div className="flex justify-between"><span className="text-slate-400">{selected.kind === "Point" ? "Latitude, Longitude" : "Titik awal (Lat, Lon)"}</span><span className="font-mono">{selected.coords[0].toFixed(6)}, {selected.coords[1].toFixed(6)} <button onClick={() => navigator.clipboard.writeText(`${selected.coords[0]}, ${selected.coords[1]}`)}><Copy className="inline size-3" /></button></span></div><div className="flex justify-between"><span className="text-slate-400">Sumber file</span><span>{selected.file}</span></div><div className="flex justify-between gap-2"><span className="text-slate-400">KML / Geometri</span><span className="break-all text-right">{selected.kmlFile} · {selected.kind}</span></div>{selected.props && Object.keys(selected.props).length > 0 && <details open className="mt-2 border-t pt-2"><summary className="cursor-pointer font-semibold">Atribut objek KMZ/KML</summary><dl className="mt-2 space-y-2">{Object.entries(selected.props).map(([key, value]) => <div key={key} className="rounded bg-slate-50 p-2"><dt className="break-all font-medium text-slate-500">{key}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{value === null || value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl></details>}{nearestPole && <div className="rounded-md bg-emerald-50 p-2 text-emerald-700">Tiang terdekat: <b>{nearestPole.f.name}</b><br />Jarak garis lurus: {nearestPole.d.toFixed(1)} m</div>}</div></section>}</main>
     </div><ApplicationLog entries={logs} /><footer className="flex h-7 shrink-0 items-center justify-between border-t bg-white px-4 text-[10px] text-slate-400"><span>Koordinat kursor: —</span><span>{displayed.length} fitur terlihat</span><span>{baseMaps[settings.baseMap].provider}</span></footer>
   </div>
 }

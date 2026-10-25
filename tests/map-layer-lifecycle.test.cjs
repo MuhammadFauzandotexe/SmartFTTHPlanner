@@ -80,6 +80,7 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     const harness = hooks()
     const { default: MapView } = load('../components/map-view.tsx', { react: harness.react, 'react-leaflet': { MapContainer: 'MapContainer', TileLayer: 'TileLayer', useMap: () => map }, leaflet, '@/components/recommendation-map-layer': { RecommendationMapLayer: 'RecommendationMapLayer' },
       '@/components/fat-selection-layer': { FatSelectionLayer: 'FatSelectionLayer' },
+      '@/components/pole-placement-layer': { PolePlacementLayer: 'PolePlacementLayer' },
       '@/components/planning-map-layers': { PlanningMapLayers: () => null }, '@/lib/survey': survey, '@/lib/layer-settings': preferences, 'leaflet/dist/leaflet.css': {} })
     const item = { id: 'house', name: '001', category: 'Rumah', geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }
     const line = { ...item, id: 'line', geometry: { type: 'LineString', coordinates: [[107, -6], [108, -6]] } }
@@ -127,6 +128,22 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     assert.equal(satellite.key, tree.key)
     assert.notEqual(satellite.props.children[0].key, tree.props.children[0].key)
     assert.equal(geometryBuilds, 3)
+    const placement=MapView({features:items,settings,onSelect:select,placementContext:{plan:{groups:[]},poles:[]},onPickPole(){},plan:{groups:[]},provisional:{}})
+    assert(placement.props.children[2].every(child=>child.props.disabled===true))
+    assert.equal(placement.props.children[3],false)
+    assert.equal(placement.props.children[5],false)
+    assert.equal(placement.props.children[6].type,'PolePlacementLayer')
+    props={...props,disabled:true}
+    harness.render(()=>categoryElement.type(props))
+    assert.equal(map.panes[preferences.layerPaneName('Rumah')].style.filter,'blur(1.5px)')
+    const muted=[...map.layers][0]
+    muted.children[0].children[0].events.click()
+    assert.equal(clickedObjects.length,1)
+    props={...props,disabled:false}
+    harness.render(()=>categoryElement.type(props))
+    assert.equal(map.panes[preferences.layerPaneName('Rumah')].style.filter,'')
+    ;[...map.layers][0].children[0].children[0].events.click()
+    assert.equal(clickedObjects.length,2)
     harness.cleanup()
     assert.equal(map.layers.size, 0)
   } finally { global.document = oldDocument }
@@ -408,6 +425,13 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   tree = harness.render(Viewer)
   assert.equal(panel(tree).props.plan, null)
   assert.deepEqual(runs, [])
+  find(tree,node=>node.type==='button'&&node.props.children==='FAT').props.onClick();tree=harness.render(Viewer)
+  const initialPlacement=find(tree,node=>node.type==='MapView').props.placementContext
+  assert.equal(initialPlacement.poles.length,1)
+  assert.equal(initialPlacement.plan.groups.length,0)
+  find(tree,node=>node.type==='button'&&node.props.children==='Batal menambah FAT').props.onClick();tree=harness.render(Viewer)
+  assert.equal(find(tree,node=>node.type==='MapView').props.placementContext,null)
+  assert.equal(panel(tree).props.plan,null)
   panel(tree).props.onRun()
   tree = harness.render(Viewer)
   assert.deepEqual(runs, [25])
@@ -490,6 +514,31 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   assert.deepEqual(cameraChanges,[])
   panel(tree).props.onRun();tree=harness.render(Viewer)
   assert(panel(tree).props.plan.groups.find(g=>g.id==='G002').homes.some(h=>h.id==='h0'))
+  const limitControl=tree=>find(tree,node=>node.props?.id==='max-fats-per-pole')
+  assert.equal(limitControl(tree).props.value,2)
+  assert.equal(limitControl(tree).props.children.length,10)
+  section(tree,'Component').props.onOpenChange(true);tree=harness.render(Viewer)
+  find(tree,node=>node.type==='button'&&node.props.children==='FAT').props.onClick();tree=harness.render(Viewer)
+  assert(mapView(tree).props.placementContext)
+  const beforeInstall=panel(tree).props.plan
+  mapView(tree).props.onPickPole('p');tree=harness.render(Viewer)
+  assert.equal(panel(tree).props.plan,beforeInstall)
+  assert(find(tree,node=>node.props?.role==='alert'&&String(node.props.children).includes('batas 2')))
+  limitControl(tree).props.onChange({target:{value:'3'}});tree=harness.render(Viewer)
+  const beforeDevices=panel(tree).props.plan.groups.length
+  cameraChanges.length=0
+  mapView(tree).props.onPickPole('p');tree=harness.render(Viewer)
+  assert.equal(mapView(tree).props.placementContext,null)
+  assert.equal(panel(tree).props.plan.groups.length,beforeDevices+1)
+  const manual=panel(tree).props.plan.groups.at(-1)
+  assert.equal(manual.homes.length,0)
+  assert.equal(manual.capacity,16)
+  assert.equal(manual.locked,true)
+  assert.deepEqual(cameraChanges,[])
+  panel(tree).props.onRun();tree=harness.render(Viewer)
+  assert(panel(tree).props.plan.groups.some(g=>g.candidate?.id===manual.candidate.id))
+  limitControl(tree).props.onChange({target:{value:'1'}});tree=harness.render(Viewer)
+  assert(panel(tree).props.plan.groups.some(g=>g.candidate?.id===manual.candidate.id))
 })
 
 test('collapsible control sections report user toggles without duplicate state updates', () => {
@@ -583,6 +632,31 @@ test('FAT picker draws only spare FAT devices and target home; shared pole choic
     assert(markers[0].popup.children[2].textContent.includes('1 port tersedia'))
     markers[0].popup.children[2].events.click()
     assert.deepEqual(picked,['spare'])
+    harness.cleanup();assert.equal(map.layers.size,0)
+  } finally {global.document=previousDocument}
+})
+
+test('pole placement highlights available and full poles with counts and preserves the camera',()=>{
+  const previousDocument=global.document
+  global.document={createElement:()=>({})}
+  try {
+    class Group {constructor(){this.children=[]}addTo(map){this.map=map;map.layers.add(this);return this}addLayer(layer){this.children.push(layer);return this}remove(){this.map.layers.delete(this)}clearLayers(){this.children=[]}}
+    const markers=[]
+    const leaflet={featureGroup:()=>new Group(),circleMarker:(position,options)=>{const marker={position,options,events:{},bindTooltip(text){this.tooltip=text;return this},on(event,callback){this.events[event]=callback;return this}};markers.push(marker);return marker}}
+    const map={layers:new Set(),panes:{},getPane(id){return this.panes[id]},createPane(id){return this.panes[id]={style:{}}},fitBounds(){assert.fail('placement must not fit map')}}
+    const harness=hooks(),picked=[]
+    const allocations=require('../lib/allocation-recommendations.ts'),planning=require('../lib/ftth-planning.ts')
+    const {PolePlacementLayer}=load('../components/pole-placement-layer.tsx',{react:harness.react,'react-leaflet':{useMap:()=>map},leaflet,'@/lib/allocation-recommendations':allocations,'@/lib/ftth-planning':planning})
+    const first={id:'p1',name:'Tiang penuh',coordinates:[107,-6]},second={id:'p2',name:'Tiang kosong',coordinates:[107.01,-6]}
+    const context={plan:{fatPorts:8,maxFatsPerPole:1,groups:[{id:'g',homes:[],candidate:{id:'f',pole:first}}]},poles:[first,second]}
+    harness.render(()=>PolePlacementLayer({context,onPick:id=>picked.push(id)}))
+    assert.equal(markers.length,2)
+    assert.deepEqual(markers[0].position,[-6,107])
+    assert.equal(markers[0].options.color,'#b45309')
+    assert.equal(markers[1].options.color,'#047857')
+    assert(markers[1].options.radius>10)
+    assert.match(markers[0].tooltip.textContent,/1\/1 FAT.*Batas tercapai/)
+    markers[1].events.click();assert.deepEqual(picked,['p2'])
     harness.cleanup();assert.equal(map.layers.size,0)
   } finally {global.document=previousDocument}
 })

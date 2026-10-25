@@ -5,10 +5,11 @@ import { MapContainer, TileLayer, useMap } from "react-leaflet"
 import L from "leaflet"
 import { toGeoJSON, type Category, type FeatureItem } from "@/lib/survey"
 import { baseMaps, categories, layerPaneName, layerZIndex, type LayerSettings, type LayerStyle } from "@/lib/layer-settings"
+import { PolePlacementLayer } from "@/components/pole-placement-layer"
 import { FatSelectionLayer } from "@/components/fat-selection-layer"
 import { PlanningMapLayers } from "@/components/planning-map-layers"
 import { RecommendationMapLayer } from "@/components/recommendation-map-layer"
-import type { Proposal } from "@/lib/allocation-recommendations"
+import type { Proposal, AllocationContext } from "@/lib/allocation-recommendations"
 import type { FtthPlan, PlanningPoint } from "@/lib/ftth-planning"
 import "leaflet/dist/leaflet.css"
 
@@ -20,6 +21,8 @@ type MapViewProps = {
   settings: LayerSettings
   provisional?: Proposal | null
   onSelectProposal?: (proposal: Proposal) => void
+  placementContext?: AllocationContext | null
+  onPickPole?: (poleId: string) => void
   selectingHome?: PlanningPoint | null
   onPickFat?: (groupId: string) => void
   plan?: FtthPlan | null
@@ -67,9 +70,9 @@ function MapInitializer({ onReady }: { onReady?: (map: L.Map) => void }) {
   return null
 }
 
-function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels }: {
+function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels, disabled = false }: {
   features: FeatureItem[]; category: Category; style: LayerStyle; zIndex: number
-  onSelect: MapViewProps["onSelect"]; showLabels?: boolean
+  onSelect: MapViewProps["onSelect"]; showLabels?: boolean; disabled?: boolean
 }) {
   const map = useMap()
   const group = useRef<L.FeatureGroup | null>(null)
@@ -79,7 +82,10 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
   useEffect(() => {
     const element = map.getPane(pane) || map.createPane(pane)
     element.style.zIndex = String(zIndex)
-  }, [map, pane, zIndex])
+    element.style.filter = disabled ? "blur(1.5px)" : ""
+    element.style.opacity = disabled ? "0.25" : ""
+    element.style.pointerEvents = disabled ? "none" : ""
+  }, [map, pane, zIndex, disabled])
 
   // Geometry changes rebuild this category's group. Styling, ordering, labels,
   // basemap and visibility do not recreate the group or the Leaflet map.
@@ -87,20 +93,20 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
     const collection = L.featureGroup()
     for (const item of features) {
       const layer = L.geoJSON(toGeoJSON(item), {
-        pane,
+        pane, interactive: !disabled,
         pointToLayer: (_, latlng) => category === "Rumah" || category === "Tiang"
-          ? L.marker(latlng, { pane, title: `${category}: ${item.name}`, keyboard: true, icon: L.divIcon({ className: "survey-house-marker", html: "" }) })
-          : L.circleMarker(latlng, { pane }),
+          ? L.marker(latlng, { pane, title: `${category}: ${item.name}`, keyboard: !disabled, interactive: !disabled, icon: L.divIcon({ className: "survey-house-marker", html: "" }) })
+          : L.circleMarker(latlng, { pane, interactive: !disabled }),
         onEachFeature: (_, featureLayer) => visitLeaves(featureLayer, leaf => {
           names.set(leaf, item.name)
-          leaf.on("click", () => onSelect(item))
+          leaf.on("click", () => { if (!disabled) onSelect(item) })
         }),
       })
       collection.addLayer(layer)
     }
     group.current = collection
     return () => { collection.remove(); collection.clearLayers(); group.current = null }
-  }, [features, category, pane, map, onSelect])
+  }, [features, category, pane, map, onSelect, disabled])
 
   useEffect(() => {
     if (!group.current) return
@@ -114,13 +120,13 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
         leaf.setStyle({ color: style.color, fillColor: style.color, weight: style.lineWidth, fillOpacity: style.fillOpacity })
       }
     })
-  }, [style, features, category, map, onSelect])
+  }, [style, features, category, map, onSelect, disabled])
 
   useEffect(() => {
     if (!group.current) return
     if (style.visible) group.current.addTo(map)
     else group.current.remove()
-  }, [style.visible, features, category, map, onSelect])
+  }, [style.visible, features, category, map, onSelect, disabled])
 
   useEffect(() => {
     if (!group.current) return
@@ -132,19 +138,20 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
         leaf.bindTooltip(text)
       }
     })
-  }, [showLabels, features, category, map, onSelect])
+  }, [showLabels, features, category, map, onSelect, disabled])
   return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, selectingHome, onPickFat, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
+export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, placementContext, onPickPole, selectingHome, onPickFat, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
   const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
   const base = baseMaps[settings.baseMap]
   return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
     <TileLayer key={settings.baseMap} attribution={base.attribution} url={base.url} maxNativeZoom={19} maxZoom={22} />
     <MapInitializer onReady={onReady} />
-    {!selectingHome && categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
-    {!selectingHome && provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
-    {selectingHome && plan && onPickFat && <FatSelectionLayer plan={plan} home={selectingHome} onPick={onPickFat} />}
-    {!selectingHome && plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
+    {!selectingHome && categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} disabled={!!placementContext} />)}
+    {!selectingHome && !placementContext && provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
+    {!placementContext && selectingHome && plan && onPickFat && <FatSelectionLayer plan={plan} home={selectingHome} onPick={onPickFat} />}
+    {!placementContext && !selectingHome && plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
+    {placementContext && onPickPole && <PolePlacementLayer context={placementContext} onPick={onPickPole} />}
   </MapContainer>
 }
