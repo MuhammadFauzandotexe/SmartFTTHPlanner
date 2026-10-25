@@ -25,9 +25,9 @@ export type FatCandidate = {
   id: string
   pole: PlanningPoint
   totalDistanceMeters: number
-  connections: { homeId: string; distanceMeters: number }[]
+  connections: { homeId: string; distanceMeters: number; method?: "route" | "straight-line" }[]
 }
-export type HomeGroup = { id: string; color: string; homes: PlanningPoint[]; candidate: FatCandidate | null }
+export type HomeGroup = { capacity?: number; occupiedPorts?: number; locked?: boolean; id: string; color: string; homes: PlanningPoint[]; candidate: FatCandidate | null }
 export type PlanningIssue = { id: string; name: string; reason: string }
 export type FtthPlan = {
   fatPorts: number

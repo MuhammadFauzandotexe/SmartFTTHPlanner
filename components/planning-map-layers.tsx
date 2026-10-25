@@ -133,7 +133,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
         const button = document.createElement("button")
         button.type = "button"
         button.className = "planning-fat-choice"
-        button.textContent = `${group.candidate!.id} · ${group.id} · ${group.homes.length}/${plan.fatPorts} port`
+        button.textContent = `${group.candidate!.id} · ${group.id} · ${group.homes.length + (group.occupiedPorts || 0)}/${group.capacity ?? plan.fatPorts} port`
         button.addEventListener("click", () => { onSelectGroup(group.id); marker.closePopup() })
         popup.appendChild(button)
       }

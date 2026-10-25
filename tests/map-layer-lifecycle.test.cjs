@@ -78,7 +78,8 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     }
     const map = { layers: new Set(), panes: {}, getPane(name) { return this.panes[name] }, createPane(name) { return this.panes[name] = { style: {} } } }
     const harness = hooks()
-    const { default: MapView } = load('../components/map-view.tsx', { react: harness.react, 'react-leaflet': { MapContainer: 'MapContainer', TileLayer: 'TileLayer', useMap: () => map }, leaflet, '@/components/planning-map-layers': { PlanningMapLayers: () => null }, '@/lib/survey': survey, '@/lib/layer-settings': preferences, 'leaflet/dist/leaflet.css': {} })
+    const { default: MapView } = load('../components/map-view.tsx', { react: harness.react, 'react-leaflet': { MapContainer: 'MapContainer', TileLayer: 'TileLayer', useMap: () => map }, leaflet, '@/components/recommendation-map-layer': { RecommendationMapLayer: 'RecommendationMapLayer' },
+      '@/components/planning-map-layers': { PlanningMapLayers: () => null }, '@/lib/survey': survey, '@/lib/layer-settings': preferences, 'leaflet/dist/leaflet.css': {} })
     const item = { id: 'house', name: '001', category: 'Rumah', geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }
     const line = { ...item, id: 'line', geometry: { type: 'LineString', coordinates: [[107, -6], [108, -6]] } }
     const polygon = { ...item, id: 'polygon', geometry: { type: 'Polygon', coordinates: [[[107, -6], [108, -6], [108, -7], [107, -6]]] } }
@@ -346,6 +347,8 @@ test('FAT configuration is applied only after manual planning and dropdown navig
     '@/lib/import-survey': { importSurveyFile: async () => ({ features: data, warnings: [], metadataWarnings: [], geometryWarnings: [] }), ImportSurveyError: class extends Error {} },
     '@/lib/survey': survey,
     '@/lib/application-log': applicationLog,
+    '@/lib/allocation-recommendations': require('../lib/allocation-recommendations.ts'),
+    '@/components/allocation-panel': { AllocationPanel: 'AllocationPanel' },
     '@/lib/ftth-planning': { ...planning, planFtth: (features, capacity, limit) => { runs.push(capacity); return planning.planFtth(features, capacity, limit) } },
     '@/lib/layer-settings': preferences,
     '@/hooks/use-application-log': { useApplicationLog: () => ({ entries: [], addLogs }) },
@@ -441,4 +444,50 @@ test('collapsible control sections report user toggles without duplicate state u
   assert.deepEqual(changes, [true])
   tree.props.onToggle({ currentTarget: { open: false } })
   assert.deepEqual(changes, [true, false])
+})
+
+test('recommendation UI journey: unserved → generate → map focus → explicit verification → accept', () => {
+  const a = require('../lib/allocation-recommendations.ts')
+  const harness = hooks()
+  const home = {id:'h',name:'Rumah uji',sourceId:'h',file:'test',coordinates:[.0001,0]}
+  const pole = {id:'p',name:'Tiang uji',sourceId:'p',file:'test',coordinates:[0,0]}
+  let context = {plan:{fatPorts:8,maxDropLengthMeters:50,distanceMethod:'straight-line',groups:[],unservedHomes:[{home,reason:'belum terlayani'}],homeCount:1,poleCount:1,issues:[],warnings:[]},poles:[pole]}
+  let state = a.emptyAllocations()
+  const focused = []
+  const { AllocationPanel } = load('../components/allocation-panel.tsx', {
+    react:harness.react, '@/lib/allocation-recommendations':a,
+    './ui/button':{Button:'button'}, './ui/input':{Input:'input'},
+  })
+  function find(node,predicate) {
+    if(!node||typeof node!=='object')return null
+    if(Array.isArray(node)){for(const child of node){const hit=find(child,predicate);if(hit)return hit}return null}
+    return predicate(node)?node:find(node.props?.children,predicate)
+  }
+  function text(node){if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+  const render=()=>harness.render(()=>AllocationPanel({context,state,onChange:next=>{state=next},onAccept:id=>{const accepted=a.acceptProposal(context,state,id);state=accepted.state;context={...context,plan:accepted.plan}},onFocus:p=>focused.push(p),issues:[]}))
+  const button=(tree,label)=>find(tree,n=>n.type==='button'&&text(n)===label)
+  let tree=render()
+  button(tree,'Rekomendasikan Alokasi').props.onClick();tree=render()
+  assert.equal(state.proposals.length,1);assert.equal(context.plan.unservedHomes.length,1)
+  const proposalButton=find(tree,n=>n.type==='button'&&text(n).includes('FAT baru pada tiang tanpa FAT'))
+  proposalButton.props.onClick();tree=render()
+  assert.equal(focused.at(-1).target.pole.id,'p')
+  assert.equal(button(tree,'Setujui sebagai rancangan aktif').props.disabled,true)
+  find(tree,n=>n.props?.['aria-label']==='Panjang jalur h').props.onChange({target:{value:'20'}});tree=render()
+  find(tree,n=>n.props?.['aria-label']==='Izin jalur h').props.onChange({target:{value:'yes'}});tree=render()
+  for(const phrase of ['Pemasangan FAT di tiang ini','Akses dan kapasitas distribusi/upstream']){
+    const label=find(tree,n=>n.type==='label'&&text(n).includes(phrase))
+    find(label,n=>n.type==='input').props.onChange({target:{checked:true}});tree=render()
+  }
+  const limitLabel=find(tree,n=>n.type==='label'&&text(n).includes('Batas FAT pada tiang'))
+  find(limitLabel,n=>n.type==='input').props.onChange({target:{value:'1'}});tree=render()
+  find(tree,n=>n.type==='textarea').props.onChange({target:{value:'Verifikasi uji: izin jalur, panjang aktual 20 m, pemasangan dan upstream diperiksa'}});tree=render()
+  button(tree,'Simpan dan validasi ulang').props.onClick();tree=render()
+  assert.equal(a.checkProposal(context,state.proposals[0]).status,'passed')
+  assert.equal(context.plan.unservedHomes.length,1)
+  assert.equal(button(tree,'Setujui sebagai rancangan aktif').props.disabled,false)
+  button(tree,'Setujui sebagai rancangan aktif').props.onClick();tree=render()
+  assert.equal(context.plan.unservedHomes.length,0);assert.equal(context.plan.groups.length,1)
+  assert.equal(state.locks.length,1);assert.equal(state.proposals[0].decision,'accepted')
+  assert.equal(a.proposalStatus(context,state.proposals[0]),'passed')
 })

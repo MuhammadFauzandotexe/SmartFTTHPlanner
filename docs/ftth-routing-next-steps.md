@@ -29,6 +29,10 @@ Belum ada penugasan ulang ke FAT kelompok lain. Pemilihan tiang existing tetap b
 - Tidak menjalankan production build, pemeriksaan visual browser, atau perbandingan terarah kasus G026. Tidak ada kegagalan tersisa pada pemeriksaan yang dijalankan.
 - Workspace sudah berisi perubahan lokal sebelum sesi ini; perubahan tersebut dipertahankan. Tidak membuat commit/push.
 
+## Prioritas sekarang
+
+Fitur rekomendasi alokasi rumah belum terlayani menjadi prioritas sesi ini. Roadmap di bawah ditunda, tidak dihapus atau diimplementasikan. Lihat [catatan rekomendasi alokasi](ftth-allocation-recommendations.md).
+
 ## Pekerjaan besok — belum diimplementasikan
 - [ ] Memodelkan akses rumah ke jalur pemasangan yang diizinkan.
 - [ ] Menghitung matriks panjang jalur rumah–kandidat FAT.
