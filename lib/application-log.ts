@@ -10,7 +10,7 @@ export const MAX_LOG_ENTRIES = 300
 export function initialLogMessages(): LogInput[] {
   return [
     { level: "info", source: "Aplikasi", title: "Viewer siap — impor data survei untuk memulai", details: [
-      { label: "Penyimpanan survei", value: "Data impor dan hasil perencanaan hanya tersimpan selama sesi. Muat ulang halaman memerlukan impor dan perhitungan ulang." },
+      { label: "Penyimpanan survei", value: "Data impor dan perencanaan berada di sesi. Gunakan Distribusi → Simpan/buka untuk snapshot proyek lokal atau JSON. Snapshot browser terakhir dipulihkan saat membuka aplikasi; perubahan baru tersimpan setelah menekan Simpan." },
       { label: "Preferensi layer", value: "Warna, ukuran, visibility, urutan layer dan base map tersimpan otomatis di browser jika localStorage tersedia." },
       { label: "Urutan dan ukuran", value: "Layer paling atas pada daftar ditampilkan paling depan. Ukuran marker dan ketebalan garis memakai satuan piksel." },
     ] },

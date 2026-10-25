@@ -1,17 +1,17 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "./ui/button"
 import { Input } from "./ui/input"
 import { assessUnserved, checkProposal, generateRecommendations, inputRevision, makeProposal, overrideProposal, proposalStatus, targets, updateDecision, type AllocationContext, type AllocationState, type ManualVerification, type Proposal, type Truth } from "@/lib/allocation-recommendations"
 
 export const proposalLabels = { ASSIGN_EXISTING_FAT: "Alokasi ke FAT existing", INSTALL_NEW_FAT: "FAT baru pada tiang tanpa FAT", ADD_FAT_ON_EXISTING_POLE: "FAT tambahan pada tiang ber-FAT" }
-const statusLabels = { passed: "Lolos pemeriksaan", "needs-verification": "Perlu verifikasi", failed: "Gagal pemeriksaan", stale: "Stale — evaluasi ulang" }
-const decisionLabels = { pending: "Pending", accepted: "Disetujui / terkunci", ignored: "Diabaikan", deleted: "Dihapus / suppressed" }
+const statusLabels = { passed: "Lolos pemeriksaan", "needs-verification": "Perlu verifikasi", failed: "Gagal pemeriksaan", stale: "Perlu evaluasi ulang" }
+const decisionLabels = { pending: "Menunggu review", accepted: "Disetujui / terkunci", ignored: "Diabaikan", deleted: "Dihapus / dapat dipulihkan" }
 const reasonLabels = { CAPACITY_UNAVAILABLE: "Kapasitas tidak tersedia", DROP_LIMIT_EXCEEDED: "Melebihi batas drop", NO_ALLOWED_PATH: "Jalur/pemasangan tidak diizinkan", INSUFFICIENT_DATA: "Data belum cukup" }
-type Props = { context: AllocationContext; state: AllocationState; onChange: (state: AllocationState) => void; onAccept: (id: string) => void; onFocus: (p: Proposal) => void; issues: string[] }
+type Props = { onFit?: (p:Proposal)=>void; hideGenerate?: boolean; disabled?: boolean; selectedProposalId?: string | null; context: AllocationContext; state: AllocationState; onChange: (state: AllocationState) => void; onAccept: (id: string) => void; onFocus: (p: Proposal) => void; issues: string[] }
 const blankVerification = (): ManualVerification => ({paths:{},installation:false,upstream:false,capacityConfirmed:false,note:""})
-export function AllocationPanel({context:ctx,state,onChange,onAccept,onFocus,issues}:Props) {
+export function AllocationPanel({onFit,hideGenerate=false,disabled=false,selectedProposalId,context:ctx,state,onChange,onAccept,onFocus,issues}:Props) {
   const [selectedId,setSelectedId]=useState<string|null>(null)
   const [draft,setDraft]=useState<Proposal|null>(null)
   const [verification,setVerification]=useState<ManualVerification>(blankVerification)
@@ -36,7 +36,11 @@ export function AllocationPanel({context:ctx,state,onChange,onAccept,onFocus,iss
     setSelectedId(p.id);setDraft({...p,target:liveTarget||p.target,type:liveTarget?.type||p.type,revision});setNote(p.note);setError("")
     setVerification(proposalStatus(ctx,p)==="stale"?blankVerification():p.verification||blankVerification());onFocus(p)
   }
-  const act=(fn:()=>void)=>{try{fn();setError("")}catch(e){setError(e instanceof Error?e.message:String(e))}}
+  useEffect(()=>{
+    const p=state.proposals.find(p=>p.id===selectedProposalId)
+    if(p){setSelectedId(p.id);setDraft({...p,revision});setNote(p.note);setVerification(proposalStatus(ctx,p)==="stale"?blankVerification():p.verification||blankVerification())}
+  },[selectedProposalId])
+  const act=(fn:()=>void)=>{try{if(disabled)throw new Error("Hitung ulang layanan dari toolbar sebelum mengubah alokasi.");fn();setError("")}catch(e){setError(e instanceof Error?e.message:String(e))}}
   const save=()=>act(()=>{
     if(!draft) return
     if(draft.revision!==revision) throw new Error("Input berubah selama editor terbuka. Pilih kembali usulan dan ulangi verifikasi.")
@@ -46,28 +50,28 @@ export function AllocationPanel({context:ctx,state,onChange,onAccept,onFocus,iss
   })
   const assessments=useMemo(()=>showCandidates?assessUnserved(ctx):[],[ctx,showCandidates])
   return <section aria-label="Rekomendasi alokasi" className="space-y-2 rounded-lg border bg-slate-50 p-2 text-[11px]">
-    <h3 className="text-xs font-semibold">Rekomendasi alokasi</h3>
+    <h3 className="text-xs font-semibold">Review usulan alokasi</h3>{disabled&&<p className="text-amber-700">Konfigurasi layanan berubah. Hasil lama dapat diperiksa; hitung ulang untuk melanjutkan perubahan.</p>}
     <p>{ctx.plan.unservedHomes.length} rumah belum terlayani · {eligible.length} usulan pending · {pendingHomes.size} rumah diusulkan</p>
     <p>Usulan bukan rancangan aktif. Kapasitas FAT baru mengikuti konfigurasi eksplisit: <b>{ctx.plan.fatPorts} port</b>. Keputusan tersimpan selama sesi ini.</p>
     {!!issues.length && <div role="alert" className="rounded border border-red-300 bg-red-50 p-2"><b>Masalah rancangan</b><ul>{issues.map((s,i)=><li key={i}>{s}</li>)}</ul><p>Desain dipertahankan; perlu peninjauan engineer, bukan dihapus otomatis.</p></div>}
     {!allTargets.length && <p>Data belum cukup: tambahkan titik tiang atau FAT melalui impor survei untuk rencana manual.</p>}
     <div className="flex flex-wrap gap-1">
-      <Button size="sm" onClick={()=>act(()=>onChange(generateRecommendations(ctx,state)))}>Rekomendasikan Alokasi</Button>
+      {!hideGenerate&&<Button size="sm" onClick={()=>act(()=>onChange(generateRecommendations(ctx,state)))}>Rekomendasikan Alokasi</Button>}
       <Button size="sm" variant="outline" disabled={!ctx.plan.unservedHomes.length||!allTargets.length} onClick={()=>{
         const home=ctx.plan.unservedHomes.find(h=>!pendingHomes.has(h.home.id))?.home||ctx.plan.unservedHomes[0]?.home
         if(home){const p=makeProposal(ctx,allTargets[0],[home],true);setSelectedId(null);setDraft(p);setNote("");setVerification(blankVerification());setError("");onFocus(p)}
       }}>Rencanakan manual</Button>
     </div>
     <label className="flex gap-2"><input type="checkbox" checked={showHistory} onChange={e=>setShowHistory(e.target.checked)}/>Tampilkan keputusan dan usulan lama</label>
-    <ul className="max-h-48 space-y-1 overflow-y-auto">{state.proposals.filter(p=>showHistory || (p.decision==="pending"&&p.revision===revision)).map(p=><li key={p.id}>
+    <ul className="max-h-48 space-y-1 overflow-y-auto">{state.proposals.filter(p=>showHistory || p.decision==="pending").map(p=><li key={p.id}>
       <button className={`w-full break-all rounded border bg-white p-2 text-left ${p.id===selectedId?"border-emerald-600":""}`} onClick={()=>open(p)}>
         <b>{proposalLabels[p.type]}</b><br/>{p.target.id} · {p.homes.length} rumah<br/>{decisionLabels[p.decision]} · {statusLabels[proposalStatus(ctx,p)]}
       </button>
     </li>)}</ul>
     {selected && selectedCheck && <div className="space-y-1 rounded border bg-white p-2">
-      <h4 className="font-semibold">Detail usulan</h4>
+      <h4 className="font-semibold">Detail usulan</h4>{onFit&&<Button size="sm" variant="outline" onClick={()=>onFit(selected)}>Fokus usulan di peta</Button>}
       <p className="break-all">{selected.target.pole.name} · ID {selected.target.pole.sourceId}</p>
-      <p>Port: {selectedCheck.used}/{selected.target.capacity} · sisa {Math.max(0,selectedCheck.remaining)} (termasuk reservasi pending lain pada tujuan yang sama)</p>
+      <p>Port: {selectedCheck.used}/{selected.target.capacity} · sisa {Math.max(0,selectedCheck.remaining)} (termasuk reservasi)</p>
       <p>Drop maksimum: {Math.max(0,...selectedCheck.drops.map(d=>d.meters)).toFixed(1)} m · batas {ctx.plan.maxDropLengthMeters} m</p>
       <ul>{selectedCheck.drops.map(d=><li key={d.homeId}>{selected.homes.find(h=>h.id===d.homeId)?.name}: {d.meters.toFixed(1)} m · {d.method==="route"?"Panjang jalur terverifikasi (catatan engineer)":"Estimasi jarak lurus"}</li>)}</ul>
       <p>{statusLabels[proposalStatus(ctx,selected)]}</p>
@@ -107,6 +111,6 @@ export function AllocationPanel({context:ctx,state,onChange,onAccept,onFocus,iss
       <Button size="sm" variant="ghost" onClick={()=>setDraft(null)}>Tutup editor</Button>
     </div>}
     {error && <p role="alert" className="text-red-700">{error}</p>}
-    <details onToggle={e=>setShowCandidates(e.currentTarget.open)}><summary className="cursor-pointer">Pemeriksaan kandidat per rumah / alternatif</summary><ul className="max-h-56 space-y-2 overflow-y-auto">{assessments.map(a=><li key={a.home.id}><b>{a.home.name}</b> belum terlayani oleh rancangan aktif.{!a.candidates.length&&<p>INSUFFICIENT_DATA: tidak ada FAT/tiang; perlukan survei tambahan dan rencanakan manual.</p>}<ul>{a.candidates.map(c=><li key={c.targetId} className="break-all">{c.targetId}: {statusLabels[c.status]} · {c.reasons.map(r=>`${r}: ${reasonLabels[r]}`).join("; ")||"INSUFFICIENT_DATA: "+c.missing.join(", ")}</li>)}</ul></li>)}</ul></details>
+    <details onToggle={e=>setShowCandidates(e.currentTarget.open)}><summary className="cursor-pointer">Pemeriksaan kandidat per rumah / alternatif</summary><ul className="max-h-56 space-y-2 overflow-y-auto">{assessments.map(a=><li key={a.home.id}><b>{a.home.name}</b> belum terlayani oleh rancangan aktif.{!a.candidates.length&&<p>INSUFFICIENT_DATA: tidak ada FAT/tiang; perlukan survei tambahan dan rencanakan manual.</p>}<ul>{a.candidates.map(c=><li key={c.targetId} className="break-all">{c.targetId}: {statusLabels[c.status]} · {c.reasons.map(r=>reasonLabels[r]).join("; ")||"Data belum cukup: "+c.missing.join(", ")}</li>)}</ul></li>)}</ul></details>
   </section>
 }

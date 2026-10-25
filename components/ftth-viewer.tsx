@@ -9,19 +9,26 @@ import { colors, toGeoJSON, type FeatureItem, type Category } from "@/lib/survey
 import { ApplicationLog } from "@/components/application-log"
 import { useApplicationLog } from "@/hooks/use-application-log"
 import { importResultLogs, planningResultLogs, type LogInput } from "@/lib/application-log"
-import { ControlSection } from "@/components/control-section"
 import { AllocationPanel } from "@/components/allocation-panel"
 import { acceptProposal, installFatOnPole, connectHomeToFat, disconnectHome, allocationContext, inputRevision, emptyAllocations, lockedDesignIssues, preserveLockedDesigns, type AllocationState, type Proposal } from "@/lib/allocation-recommendations"
+import { DistributionPanel, type ConnectionEditor } from "@/components/distribution-panel"
+import { addPoleConnection, distributionContext, distributionGeoJSON, distributionCSV, emptyDistribution, generateDistribution, type DistributionIssue, type DistributionState } from "@/lib/distribution"
+import { parseFtthProject, serializeFtthProject, PROJECT_STORAGE_KEY, type FtthProject } from "@/lib/ftth-project"
+import { WorkspaceSettings } from "@/components/workspace-settings"
+import { ObjectExplorer } from "@/components/object-explorer"
+import { SurveyDetails } from "@/components/survey-details"
+import { InspectionPanel } from "@/components/inspection-panel"
+import { serviceResultsStale, projectSignature, validateWorkspaceConfiguration, type WorkspaceConfiguration, type WorkspaceActivity, type InspectionTab } from "@/lib/workspace"
+import { generateRecommendations } from "@/lib/allocation-recommendations"
+import { distributionIsStale } from "@/lib/distribution"
+import { suggestConnections } from "@/lib/distribution"
 import { PlanningPanel } from "@/components/planning-panel"
-import { DEFAULT_MAX_FATS_PER_POLE, MAX_FATS_PER_POLE, validateMaxFatsPerPole, planFtth, extractPlanningInputs, validateMaxDropLengthMeters, DEFAULT_MAX_DROP_LENGTH_METERS, validateFatPorts, DEFAULT_FAT_PORTS, MAX_FAT_PORTS, type FtthPlan } from "@/lib/ftth-planning"
+import { DEFAULT_MAX_FATS_PER_POLE, planFtth, extractPlanningInputs, DEFAULT_MAX_DROP_LENGTH_METERS, DEFAULT_FAT_PORTS, type FtthPlan } from "@/lib/ftth-planning"
 import { LayerSettingsPanel } from "@/components/layer-settings"
 import { useLayerSettings } from "@/hooks/use-layer-settings"
 import { baseMaps } from "@/lib/layer-settings"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
-import { Upload, Maximize2, Download, Search, Network, Layers3, House, UtilityPole, Eye, EyeOff, Cable, ChevronLeft, ChevronRight, Crosshair, Ruler, X, Copy, SlidersHorizontal } from "lucide-react"
+import { Upload, Download, Network, Layers3, Cable, Crosshair, Ruler, Settings2, Save, FolderOpen, Play, RefreshCw, ListChecks, PanelLeftClose, Database, Route, Plus, ChevronDown, Info } from "lucide-react"
 
 const MapView = dynamic(() => import("@/components/map-view"), { ssr: false })
 
@@ -41,9 +48,19 @@ export default function FtthViewer() {
   const [addingFat, setAddingFat] = useState(false)
   const [placementError, setPlacementError] = useState("")
   const [fatPorts, setFatPorts] = useState(DEFAULT_FAT_PORTS)
-  const [sections, setSections] = useState({ data: false, configuration: true, planning: true, component: false, layers: false, display: false })
+  const [settingsOpen,setSettingsOpen]=useState(false)
+  const [activity,setActivity]=useState<WorkspaceActivity>("fat")
+  const [stage,setStage]=useState<"fat"|"distribution">("fat")
+  const [dockOpen,setDockOpen]=useState(false)
+  const [inspectionTab,setInspectionTab]=useState<InspectionTab>("summary")
+  const [serviceBusy,setServiceBusy]=useState(false)
+  const [recommendationBusy,setRecommendationBusy]=useState(false)
+  const serviceGuard=useRef(false),recommendationGuard=useRef(false),distributionGuard=useRef(false),projectEpoch=useRef(0)
+  const startupProject=useRef(false)
+  const [projectSession,setProjectSession]=useState(0)
+  const [savedSignature,setSavedSignature]=useState<string|null>(null)
+  const projectFileRef=useRef<HTMLInputElement>(null)
   const [resultsOpen, setResultsOpen] = useState(false)
-  const setSection = useCallback((key: keyof typeof sections, open: boolean) => setSections(previous => ({ ...previous, [key]: open })), [])
   const [features, setFeatures] = useState<FeatureItem[]>([])
   const [planning, setPlanning] = useState<{ source: FeatureItem[]; result: FtthPlan } | null>(null)
   const [allocations, setAllocations] = useState<AllocationState>(emptyAllocations)
@@ -54,6 +71,18 @@ export default function FtthViewer() {
     const inputs = extractPlanningInputs(features)
     return preserveLockedDesigns({ maxFatsPerPole, fatPorts, maxDropLengthMeters, distanceMethod: "straight-line", groups: [], homeCount: inputs.homes.length, poleCount: inputs.poles.length, issues: inputs.issues, warnings: ["Hasil otomatis perlu dihitung ulang; desain engineer terkunci dipertahankan."], unservedHomes: inputs.homes.map(home => ({ home, reason: "Hasil otomatis perlu dihitung ulang." })) }, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision)
   }, [planning, features, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, fatPorts, maxDropLengthMeters, maxFatsPerPole])
+  const [distribution, setDistribution] = useState<DistributionState>(emptyDistribution)
+  const [distributionEditor,setDistributionEditor] = useState<ConnectionEditor|null>(null)
+  const [distributionRouteKey,setDistributionRouteKey] = useState<string|null>(null)
+  const [distributionSegmentId,setDistributionSegmentId] = useState<string|null>(null)
+  const [distributionBusy,setDistributionBusy] = useState(false)
+  const [projectMessage,setProjectMessage] = useState("")
+  const distributionCtx = useMemo(()=>distributionContext(features,plan),[features,plan])
+  const configuration=useMemo(()=>({fatPorts,maxDropLengthMeters,maxFatsPerPole,candidateRadiusMeters:distribution.candidateRadiusMeters,candidateNeighbors:distribution.candidateNeighbors}),[fatPorts,maxDropLengthMeters,maxFatsPerPole,distribution.candidateRadiusMeters,distribution.candidateNeighbors])
+  const servicesStale=serviceResultsStale(plan,planning?.source===features,configuration)
+  const distributionStale=distributionIsStale(distributionCtx,distribution)
+  const currentSignature=useMemo(()=>projectSignature(features,plan,allocations,{fatPorts,maxDropLengthMeters,maxFatsPerPole},distribution),[features,plan,allocations,fatPorts,maxDropLengthMeters,maxFatsPerPole,distribution])
+  const dirty=savedSignature!==currentSignature
   const recommendationContext = useMemo(() => plan ? allocationContext(plan, features) : null, [plan, features])
   const placementContext = useMemo(()=>{
     if (!addingFat) return null
@@ -76,12 +105,8 @@ export default function FtthViewer() {
       setConnectionError("Hasil perencanaan berubah. Pilih rumah dan mulai penyambungan kembali.")
     }
   },[connectionSelection,selectingHome])
-  const [query, setQuery] = useState("")
-  const [collapsed, setCollapsed] = useState(false)
+  const [panelOpen, setPanelOpen] = useState(false)
   const [showLabels, setShowLabels] = useState(false)
-  const [measureMode, setMeasureMode] = useState(false)
-  const [measurePoints, setMeasurePoints] = useState<[number, number][]>([])
-  const [bufferMeters, setBufferMeters] = useState("100")
   const [map, setMap] = useState<L.Map | null>(null)
   const [importing, setImporting] = useState(false)
   const [fitTarget, setFitTarget] = useState<FeatureItem[]>([])
@@ -98,11 +123,10 @@ export default function FtthViewer() {
     previousStorageError.current = storageError
   }, [storageError, addLogs])
   const fileRef = useRef<HTMLInputElement>(null)
-  const visible = useMemo(() => features.filter(f => !query || `${f.name} ${f.id}`.toLowerCase().includes(query.toLowerCase())), [features, query])
+  const visible = features
   const importedFiles = useMemo(() => [...new Set(features.map(feature => feature.file))].map(name => ({ name, count: features.filter(feature => feature.file === name).length })), [features])
   const fileCount = useMemo(() => new Set(features.map(f => f.file)).size, [features])
   const displayed = useMemo(() => visible.filter(feature => settings.layers[feature.category].visible), [visible, settings.layers])
-  const counts = useMemo(() => Object.fromEntries((Object.keys(colors) as Category[]).map(c => [c, features.filter(f => f.category === c).length])) as Record<Category, number>, [features])
   const importedLength = useMemo(() => {
     let meters = 0
     flattenEach({ type: "FeatureCollection", features: features.map(toGeoJSON) }, feature => {
@@ -113,7 +137,9 @@ export default function FtthViewer() {
   const importFiles = useCallback(async (files: FileList | File[]) => {
     const selectedFiles = Array.from(files)
     if (!selectedFiles.length) return
+    projectEpoch.current++
     setAddingFat(false)
+    setDistributionEditor(null)
     setImporting(true)
     setPlanning(null)
     setResultsOpen(false)
@@ -142,7 +168,6 @@ export default function FtthViewer() {
       if (incoming.length) {
         setFeatures(previous => [...previous, ...incoming])
         setSelected(null)
-        setQuery("")
         setFitTarget(incoming)
         messages.push({ level: "info", source: "Perencanaan", title: "Data survei siap — perencanaan belum dijalankan", details: [
           { label: "Fitur baru", value: String(incoming.length) },
@@ -156,7 +181,7 @@ export default function FtthViewer() {
   }, [addLogs])
   const exportGeoJSON = () => {
     try {
-      const data = { type: "FeatureCollection", features: visible.map(toGeoJSON) }
+      const data = { type: "FeatureCollection", features: [...visible.map(toGeoJSON), ...distributionGeoJSON(distributionCtx,distribution).features] }
       const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/geo+json" }))
       const anchor = document.createElement("a")
       anchor.href = url
@@ -164,64 +189,65 @@ export default function FtthViewer() {
       anchor.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
       addLogs([{ level: "success", source: "Ekspor", title: "Unduhan GeoJSON dimulai", details: [
-        { label: "File", value: "ftth-survey.geojson" }, { label: "Jumlah fitur", value: String(visible.length) },
+        { label: "File", value: "ftth-survey.geojson" }, { label: "Jumlah fitur", value: String(data.features.length) },
       ] }])
     } catch (error) {
       addLogs([{ level: "error", source: "Ekspor", title: "Ekspor GeoJSON gagal", details: [{ label: "Penyebab", value: error instanceof Error ? error.message : "Unduhan tidak dapat disiapkan." }] }])
     }
   }
   const fitData = () => { if (map) fitFeaturesOnMap(map, features) }
-  const changeFatPorts = useCallback((value: number) => {
+  const applyConfiguration=(next:WorkspaceConfiguration)=>{
+    validateWorkspaceConfiguration(next)
+    const serviceChanged=next.fatPorts!==fatPorts||next.maxDropLengthMeters!==maxDropLengthMeters
+    setFatPorts(next.fatPorts);setMaxDropLengthMeters(next.maxDropLengthMeters);setMaxFatsPerPole(next.maxFatsPerPole)
+    setPlanning(previous=>previous?{...previous,result:{...previous.result,maxFatsPerPole:next.maxFatsPerPole}}:previous)
+    setDistribution(previous=>({...previous,candidateRadiusMeters:next.candidateRadiusMeters,candidateNeighbors:next.candidateNeighbors}))
+    if(serviceChanged){setConnectionSelection(null);setAddingFat(false)}
+    setSettingsOpen(false)
+    addLogs([{level:"info",source:"Planning Configuration",title:"Konfigurasi workspace diterapkan",details:[{label:"Layanan FAT",value:`${next.fatPorts} port; maksimum ${next.maxFatsPerPole} FAT/tiang; drop ${next.maxDropLengthMeters} m`},{label:"Kandidat distribusi",value:`radius ${next.candidateRadiusMeters} m; ${next.candidateNeighbors} tetangga`},{label:"Dampak",value:serviceChanged?"Hasil lama dipertahankan dan perlu dihitung ulang. Keputusan manual tidak dihapus.":"Tidak menjalankan proses atau mengubah koneksi existing secara otomatis."}]}])
+    setProjectMessage(serviceChanged?"Konfigurasi diterapkan. Hasil layanan lama dipertahankan; hitung ulang dari toolbar. Keputusan manual tidak dihapus.":"Konfigurasi diterapkan tanpa menjalankan proses. Koneksi dan rute existing tetap tersedia.")
+  }
+  const runPlanning = useCallback(async () => {
+    if (importing || !features.length || serviceGuard.current) return
+    const epoch=projectEpoch.current
+    serviceGuard.current=true;setServiceBusy(true)
+    setAddingFat(false);setConnectionSelection(null);setDistributionEditor(null)
     try {
-      validateFatPorts(value)
-      if (value === fatPorts) return
-      setFatPorts(value)
-      setPlanning(null)
-      setResultsOpen(false)
-      setSelectedGroupId(null)
-      setHighlightedGroupId(null)
-      setHoveredGroupId(null)
-      addLogs([{ level: "info", source: "Planning Configuration", title: "Jumlah port FAT diperbarui", details: [
-        { label: "Sebelumnya", value: `${fatPorts} port` }, { label: "Konfigurasi baru", value: `${value} port per FAT` },
-        { label: "Pengelompokan", value: `Satu rumah menggunakan satu port; maksimal ${value} rumah per kelompok.` },
-        { label: "Tindakan", value: "Hasil otomatis lama dibersihkan; desain engineer terkunci dipertahankan dan diperiksa terhadap konfigurasi baru. Jalankan pengelompokan & estimasi FAT secara manual." },
-      ] }])
-    } catch (error) {
-      addLogs([{ level: "error", source: "Planning Configuration", title: "Jumlah port FAT tidak valid", details: [{ label: "Penyebab", value: error instanceof Error ? error.message : "Masukkan jumlah port yang valid." }] }])
-    }
-  }, [fatPorts, addLogs])
-  const runPlanning = useCallback(() => {
-    if (importing || !features.length) return
-    try {
+      await new Promise(resolve=>setTimeout(resolve,0))
+      if(epoch!==projectEpoch.current)return
       const result = {...preserveLockedDesigns(planFtth(features, fatPorts, maxDropLengthMeters), allocations.locks, allocations.detachedHomeIds, allocations.manualRevision),maxFatsPerPole}
       setPlanning({ source: features, result })
       setResultsOpen(true)
-      setSection("planning", true)
+
       setSelectedGroupId(null)
       setHighlightedGroupId(null)
       setHoveredGroupId(null)
       setSelected(null)
-      setQuery("")
-      if (map) fitFeaturesOnMap(map, features)
+      setStage("fat");setInspectionTab("summary");setDockOpen(true)
       addLogs(planningResultLogs(result))
     } catch (error) {
       addLogs([{ level: "error", source: "Perencanaan", title: "Perencanaan awal gagal dijalankan", details: [{ label: "Penyebab", value: error instanceof Error ? error.message : "Perhitungan gagal." }] }])
-    }
-  }, [features, map, importing, addLogs, fatPorts, maxDropLengthMeters, setSection, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, maxFatsPerPole])
+    } finally {serviceGuard.current=false;setServiceBusy(false)}
+  }, [features, importing, addLogs, fatPorts, maxDropLengthMeters, allocations.locks, allocations.detachedHomeIds, allocations.manualRevision, maxFatsPerPole])
   const selectPlanningGroup = useCallback((id: string) => {
     const group = plan?.groups.find(item => item.id === id)
     if (!group) return
+    setLayerSettingsOpen(false);setDistributionRouteKey(null);setDistributionSegmentId(null)
+    setActivity("fat");setStage("fat");setPanelOpen(true)
     setSelectedGroupId(id)
     setResultsOpen(true)
-    setSection("planning", true)
+
     setHighlightedGroupId(id)
     setHoveredGroupId(null)
     setSelected(null)
-    setCollapsed(false)
-  }, [plan, setSection])
+    setPanelOpen(true)
+  }, [plan])
   const selectSurveyObject = useCallback((feature: FeatureItem) => {
+    setLayerSettingsOpen(false)
     setSelected(feature)
     setSelectedGroupId(null)
+    setDistributionRouteKey(null);setDistributionSegmentId(null)
+    setActivity(feature.category==="Rumah"?"fat":"data");setPanelOpen(true)
   }, [])
   const selectPlannedHome = useCallback((id: string) => {
     const home = features.find(feature => feature.id === id)
@@ -229,19 +255,25 @@ export default function FtthViewer() {
   }, [features, selectSurveyObject])
   const highlightPlanningGroup = useCallback((id: string) => {
     if (plan?.groups.some(group => group.id === id)) {
+      setLayerSettingsOpen(false);setDistributionRouteKey(null);setDistributionSegmentId(null)
+      setActivity("fat");setStage("fat");setPanelOpen(true)
       setSelectedGroupId(id)
       setResultsOpen(true)
-      setSection("planning", true)
+
       setSelected(null)
-      setCollapsed(false)
+      setPanelOpen(true)
       setHoveredGroupId(null)
       setHighlightedGroupId(previous => previous === id ? null : id)
     }
-  }, [plan, setSection])
+  }, [plan])
   const hoverPlanningGroup = useCallback((id: string | null) => setHoveredGroupId(id), [])
   const focusProposal = useCallback((proposal: Proposal) => {
+    setLayerSettingsOpen(false);setSelected(null);setSelectedGroupId(null);setHighlightedGroupId(null)
+    setAddingFat(false);setConnectionSelection(null);setDistributionEditor(null)
     setFocusedProposal(proposal)
-    setCollapsed(false)
+    setInspectionTab("proposals");setDockOpen(true)
+  }, [])
+  const fitProposal = useCallback((proposal:Proposal)=>{
     if (map) {
       const positions = [proposal.target.pole, ...proposal.homes]
       const bounds = bbox({ type: "FeatureCollection", features: positions.map(item => point(item.coordinates)) })
@@ -253,6 +285,7 @@ export default function FtthViewer() {
     setFocusedProposal(previous => next.proposals.find(p => p.id === previous?.id && p.decision === "pending") || null)
   }
   const approveAllocation = (id: string) => {
+    if(servicesStale||serviceBusy)throw new Error("Hitung ulang layanan sebelum menyetujui perubahan alokasi.")
     if (!recommendationContext) return
     const approved = acceptProposal(recommendationContext, allocations, id)
     setAllocations(approved.state)
@@ -274,15 +307,17 @@ export default function FtthViewer() {
     ] }])
   }, [plan, allocations, features, addLogs])
   const beginFatSelection = () => {
-    if (!selectedUnserved || !recommendationContext || importing) return
+    if (!selectedUnserved || !recommendationContext || importing || servicesStale) return
     setAddingFat(false)
+    setPanelOpen(false);setDockOpen(false);setLayerSettingsOpen(false)
+    setDistributionEditor(null)
     setConnectionError("")
     setConnectionSelection({homeId:selectedUnserved.home.id,revision:inputRevision(recommendationContext)})
     setFocusedProposal(null)
     setHoveredGroupId(null)
   }
   const pickFat = useCallback((groupId: string) => {
-    if (!selectingHome || !recommendationContext || importing) return
+    if (!selectingHome || !recommendationContext || importing || servicesStale) return
     try {
       const next = connectHomeToFat(recommendationContext,allocations,groupId,selectingHome.id)
       setPlanning({source:features,result:next.plan})
@@ -290,18 +325,21 @@ export default function FtthViewer() {
       setConnectionSelection(null)
       setConnectionError("")
       setSelected(null)
+      setActivity("fat");setStage("fat");setPanelOpen(true)
       setSelectedGroupId(groupId)
       setHighlightedGroupId(groupId)
       setResultsOpen(true)
-      setSection("planning",true)
+
       addLogs([{level:"success",source:"Perencanaan manual",title:"Rumah disambungkan ke FAT",details:[{label:"Rumah",value:selectingHome.name},{label:"Cluster",value:groupId},{label:"Metode",value:"Penugasan simulasi; lihat metode panjang per rumah. Estimasi jarak lurus belum memvalidasi lintasan pemasangan."}]}])
     } catch(error) {
       setConnectionError(error instanceof Error?error.message:"Penyambungan rumah gagal.")
     }
-  },[selectingHome,recommendationContext,allocations,features,importing,addLogs,setSection])
+  },[selectingHome,recommendationContext,allocations,features,importing,addLogs,servicesStale])
   const beginFatPlacement = () => {
-    if (importing) return
+    if (importing || servicesStale) return
+    setDistributionEditor(null)
     setAddingFat(true)
+    setPanelOpen(false);setDockOpen(false)
     setPlacementError("")
     setConnectionSelection(null)
     setConnectionError("")
@@ -311,87 +349,190 @@ export default function FtthViewer() {
     setLayerSettingsOpen(false)
   }
   const pickPoleForFat = useCallback((poleId: string) => {
-    if (!addingFat || !placementContext || importing) return
+    if (!addingFat || !placementContext || importing || servicesStale) return
     try {
       const next=installFatOnPole(placementContext,allocations,poleId)
       setPlanning({source:features,result:next.plan})
       setAllocations(next.state)
       setAddingFat(false)
       setPlacementError("")
+      setActivity("fat");setStage("fat");setPanelOpen(true)
       setSelectedGroupId(next.group.id)
       setHighlightedGroupId(next.group.id)
       setResultsOpen(true)
-      setSection("planning",true)
+
       addLogs([{level:"success",source:"Component",title:"FAT manual ditambahkan",details:[{label:"FAT",value:next.group.candidate!.id},{label:"Tiang",value:next.group.candidate!.pole.name},{label:"Kapasitas",value:`${next.group.capacity} port; penambahan simulasi, pemasangan/upstream belum diverifikasi.`}]}])
     } catch(error) {setPlacementError(error instanceof Error?error.message:"Penambahan FAT gagal.")}
-  },[addingFat,placementContext,allocations,features,importing,addLogs,setSection])
+  },[addingFat,placementContext,allocations,features,importing,addLogs,servicesStale])
+  const changeDistribution = useCallback((next:DistributionState)=>setDistribution(next),[])
+  const cancelDistributionConnection = useCallback(()=>setDistributionEditor(null),[])
+  const startDistributionConnection = () => {
+    setAddingFat(false);setConnectionSelection(null);setFocusedProposal(null);setSelected(null);setDockOpen(false);setLayerSettingsOpen(false)
+    setActivity("distribution");setStage("distribution");setPanelOpen(true)
+    setDistributionEditor({from:null,to:null});
+  }
+  const pickDistributionPole = useCallback((id:string)=>setDistributionEditor(current=>!current?current:!current.from||current.to?{from:id,to:null}:{from:current.from,to:id}),[])
+  const saveDistributionConnection = (allowed:boolean) => {
+    if(!distributionEditor?.from||!distributionEditor.to)throw new Error("Pilih dua tiang untuk koneksi.")
+    const next=addPoleConnection(distributionCtx,distribution,distributionEditor.from,distributionEditor.to,allowed)
+    setDistribution(next);setDistributionSegmentId(next.connections.at(-1)!.id)
+    setDistributionEditor(null)
+  }
+  const fitDistributionGeometries = useCallback((geometries:GeoJSON.Geometry[])=>{
+    if(!map||!geometries.length)return
+    const bounds=bbox({type:"FeatureCollection",features:geometries.map(geometry=>({type:"Feature" as const,geometry,properties:{}}))})
+    if(bounds.every(Number.isFinite))map.fitBounds([[bounds[1],bounds[0]],[bounds[3],bounds[2]]],{padding:[40,40],maxZoom:18})
+  },[map])
+  const selectDistributionSegment = useCallback((id:string)=>{
+    setLayerSettingsOpen(false);setSelected(null);setSelectedGroupId(null);setHighlightedGroupId(null);setHoveredGroupId(null)
+    setActivity("distribution");setStage("distribution");setDistributionSegmentId(id);setPanelOpen(true)
+  },[])
+  const selectDistributionRoute = useCallback((key:string)=>{
+    setLayerSettingsOpen(false);setSelected(null);setSelectedGroupId(null);setHighlightedGroupId(null);setHoveredGroupId(null)
+    setStage("distribution");setDistributionRouteKey(key);setInspectionTab("routes");setDockOpen(true)
+    const route=distribution.result?.routes.find(r=>r.key===key)
+    if(route?.geometry)fitDistributionGeometries([route.geometry])
+    else {const fat=distributionCtx.fats.find(f=>f.id===route?.fatId),pole=distributionCtx.poles.find(p=>p.id===fat?.poleId),coordinates=pole?.coordinates||fat?.coordinates;if(coordinates)fitDistributionGeometries([{type:"Point",coordinates}])}
+  },[distribution.result,distributionCtx,fitDistributionGeometries])
+  const focusDistributionIssue = (issue:DistributionIssue) => {
+    const segment=distribution.connections.find(s=>s.id===(issue.segmentId||issue.objectId))
+    if(segment){setDistributionSegmentId(segment.id);try{fitDistributionGeometries([segment.geometry])}catch{/* invalid geometry remains in issue panel */}return}
+    const fat=distributionCtx.fats.find(f=>f.id===issue.objectId),source=distribution.sources.find(s=>s.id===issue.objectId)
+    const pole=distributionCtx.poles.find(p=>p.id===(issue.poleId||fat?.poleId||source?.poleId||issue.objectId))
+    const coordinates=pole?.coordinates||fat?.coordinates
+    if(coordinates)fitDistributionGeometries([{type:"Point",coordinates}])
+    else setProjectMessage("Objek masalah tidak memiliki koordinat valid; periksa pemetaan ID tiang/sumber.")
+  }
+  const generateDistributionRoutes = async () => {
+    if(distributionGuard.current)return
+    const epoch=projectEpoch.current
+    distributionGuard.current=true;setDistributionBusy(true)
+    try {
+      await new Promise(resolve=>setTimeout(resolve,0))
+      if(epoch!==projectEpoch.current)return
+      const result=generateDistribution(distributionCtx,distribution)
+      setDistribution(current=>({...current,result}));setDistributionRouteKey(null);setInspectionTab("routes");setDockOpen(true)
+      setProjectMessage(`Distribusi selesai: ${result.summary.successCount}/${result.summary.targetCount} FAT terjangkau.`)
+    } catch(error) {setProjectMessage(error instanceof Error?error.message:"Generate distribusi gagal.")}
+    finally {distributionGuard.current=false;setDistributionBusy(false)}
+  }
+  const projectSnapshot = ():FtthProject => ({format:"smart-ftth-project",version:1,savedAt:new Date().toISOString(),features,plan,allocations,configuration:{fatPorts,maxDropLengthMeters,maxFatsPerPole},distribution})
+  const downloadProjectText = (name:string,contents:string,type:string) => {
+    const url=URL.createObjectURL(new Blob([contents],{type})),anchor=document.createElement("a")
+    anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000)
+  }
+  const projectAction = (action:()=>void,message:string) => {try{action();setProjectMessage(message)}catch(error){setProjectMessage(error instanceof Error?error.message:"Operasi proyek gagal. Simpanan sebelumnya tidak diubah.")}}
+  const restoreProject = (value:unknown) => {
+    const project=parseFtthProject(value)
+    projectEpoch.current++
+    setSettingsOpen(false);setLayerSettingsOpen(false);setPanelOpen(false);setDockOpen(false)
+    setProjectSession(n=>n+1)
+    setFeatures(project.features);setPlanning(project.plan?{source:project.features,result:project.plan}:null)
+    setAllocations(project.allocations);setDistribution(project.distribution)
+    setFatPorts(project.configuration.fatPorts);setMaxDropLengthMeters(project.configuration.maxDropLengthMeters);setMaxFatsPerPole(project.configuration.maxFatsPerPole)
+    setAddingFat(false);setConnectionSelection(null);setDistributionEditor(null);setFocusedProposal(null)
+    setSelected(null);setSelectedGroupId(null);setHighlightedGroupId(null);setHoveredGroupId(null);setDistributionRouteKey(null);setDistributionSegmentId(null);setFitTarget([])
+    setResultsOpen(true);
+    setSavedSignature(projectSignature(project.features,project.plan,project.allocations,project.configuration,project.distribution))
+  }
+  const saveProjectInBrowser = () => projectAction(()=>{localStorage.setItem(PROJECT_STORAGE_KEY,serializeFtthProject(projectSnapshot()));setSavedSignature(currentSignature)},"Snapshot proyek tersimpan di browser. Unduh JSON untuk salinan portabel.")
+  const openBrowserProject = () => projectAction(()=>{const saved=localStorage.getItem(PROJECT_STORAGE_KEY);if(!saved)throw new Error("Belum ada simpanan proyek di browser.");restoreProject(JSON.parse(saved))},"Proyek dibuka dari simpanan browser; hasil diperiksa terhadap input terbaru.")
+  const downloadProject = () => projectAction(()=>{downloadProjectText("smart-ftth-project.json",serializeFtthProject(projectSnapshot()),"application/json");setSavedSignature(currentSignature)},"Snapshot proyek JSON diunduh.")
+  const openProjectFile = async (file:File) => {try{restoreProject(JSON.parse(await file.text()));setProjectMessage(`Proyek ${file.name} dibuka.`)}catch(error){setProjectMessage(error instanceof Error?error.message:"Berkas proyek tidak valid; rancangan aktif tidak diganti.")}}
+  useEffect(()=>{
+    if(startupProject.current||typeof localStorage==='undefined')return
+    startupProject.current=true
+    try{const saved=localStorage.getItem(PROJECT_STORAGE_KEY);if(saved){restoreProject(JSON.parse(saved));setProjectMessage("Snapshot browser terakhir dipulihkan. Perubahan baru disimpan melalui tombol Simpan.")}}
+    catch(error){setProjectMessage(error instanceof Error?error.message:"Simpanan tidak dapat dibuka; data tersimpan tidak dihapus.")}
+  },[])
+  const exportDistribution = (format:"geojson"|"csv") => projectAction(()=>downloadProjectText(`ftth-distribution.${format}`,format==="geojson"?JSON.stringify(distributionGeoJSON(distributionCtx,distribution),null,2):distributionCSV(distributionCtx,distribution),format==="geojson"?"application/geo+json":"text/csv;charset=utf-8"),"Ekspor distribusi diunduh. Hasil lama diberi status stale, bukan final.")
   const nearestPole = selected?.category === "Rumah" && selected.kind === "Point" ? features.filter(f => f.category === "Tiang" && f.kind === "Point").map(f => ({ f, d: distance(point([selected.coords[1], selected.coords[0]]), point([f.coords[1], f.coords[0]]), { units: "meters" }) })).sort((a, b) => a.d - b.d)[0] : null
-  const measureTotal = measurePoints.length > 1 ? measurePoints.slice(1).reduce((sum, p, i) => sum + distance(point([measurePoints[i][1], measurePoints[i][0]]), point([p[1], p[0]]), { units: "meters" }), 0) : 0
 
-  return <div className="flex h-screen flex-col overflow-hidden bg-[#f7f9fb] text-slate-800">
-    <header className="flex h-[68px] shrink-0 items-center justify-between border-b bg-white px-5">
-      <div className="flex items-center gap-3"><div className="flex size-9 items-center justify-center rounded-lg bg-emerald-600 text-white"><Cable /></div><div><h1 className="text-[15px] font-bold tracking-tight">FTTH Survey Viewer</h1><p className="text-[11px] text-slate-400">Smart FTTH Planner</p></div></div>
-      <div className="flex items-center gap-2"><input ref={fileRef} type="file" accept=".kml,.kmz" disabled={importing} multiple className="hidden" onChange={e => e.target.files && importFiles(e.target.files)} /><Button size="sm" disabled={importing} onClick={() => fileRef.current?.click()}><Upload data-icon="inline-start" /> {importing ? "Mengimpor..." : "Impor Data"}</Button><Button size="sm" variant="outline" disabled={!features.length} onClick={fitData}><Maximize2 data-icon="inline-start" /> Fit ke Data</Button><Button size="sm" variant="outline" disabled={!visible.length} onClick={exportGeoJSON}><Download data-icon="inline-start" /> Ekspor</Button></div>
+  const closeMenuOnEscape=(event:React.KeyboardEvent<HTMLDetailsElement>)=>{if(event.key==='Escape'){event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus()}}
+  const openInspection=(tab:InspectionTab)=>{setInspectionTab(tab);setDockOpen(true)}
+  const openActivity=(next:WorkspaceActivity)=>{
+    setLayerSettingsOpen(false);setActivity(next)
+    if(next==='inspection'){setPanelOpen(false);openInspection('issues');return}
+    setPanelOpen(previous=>activity===next?!previous:true)
+    if(next==='fat'||next==='distribution')setStage(next)
+  }
+  const runRecommendations=async()=>{
+    if(!recommendationContext||servicesStale||serviceBusy||recommendationGuard.current)return
+    const epoch=projectEpoch.current
+    recommendationGuard.current=true;setRecommendationBusy(true)
+    try{await new Promise(resolve=>setTimeout(resolve,0));if(epoch!==projectEpoch.current)return;changeAllocations(generateRecommendations(recommendationContext,allocations));openInspection('proposals')}
+    catch(error){setProjectMessage(error instanceof Error?error.message:'Rekomendasi gagal.')}
+    finally{recommendationGuard.current=false;setRecommendationBusy(false)}
+  }
+  const suggestDistributionConnections=()=>{try{setDistribution(suggestConnections(distributionCtx,distribution));setStage('distribution');setActivity('distribution');setPanelOpen(true)}catch(error){setProjectMessage(error instanceof Error?error.message:'Saran koneksi gagal.')}}
+  const inspectHouse=(id:string)=>{const home=features.find(f=>f.id===id);if(home){selectSurveyObject(home);if(map)fitFeaturesOnMap(map,[home]);setDockOpen(false)}}
+  const inspectDistributionIssue=(issue:DistributionIssue)=>{focusDistributionIssue(issue);setActivity('distribution');setPanelOpen(true);setDockOpen(false)}
+  const editing=!!(addingFat||selectingHome||distributionEditor)
+  const closePanel=()=>{setPanelOpen(false);if(typeof document!=='undefined')document.querySelector<HTMLButtonElement>('.workspace-nav button[aria-pressed="true"]')?.focus()}
+  const activeMode=addingFat?'Tambah FAT':selectingHome?'Sambungkan rumah':distributionEditor?'Tambah koneksi':'Pilih objek'
+  const cancelMode=()=>{if(addingFat||selectingHome)setPanelOpen(true);setAddingFat(false);setPlacementError('');setConnectionSelection(null);setConnectionError('');setDistributionEditor(null)}
+  useEffect(()=>{
+    if(typeof window==='undefined')return
+    const escape=(event:KeyboardEvent)=>{if(event.key!=='Escape'||settingsOpen)return;if(addingFat||selectingHome||distributionEditor){cancelMode();return}if(layerSettingsOpen){setLayerSettingsOpen(false);layerSettingsButton.current?.focus();return}if(dockOpen&&(event.target as HTMLElement|null)?.closest?.('.workspace-inspection')){setDockOpen(false);document.querySelector<HTMLButtonElement>('[aria-controls="inspection-body"]')?.focus();return}if(panelOpen)closePanel();else if(dockOpen){setDockOpen(false);document.querySelector<HTMLButtonElement>('[aria-controls="inspection-body"]')?.focus()}}
+    window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape)
+  },[settingsOpen,addingFat,selectingHome,distributionEditor,layerSettingsOpen,panelOpen,dockOpen])
+  const pendingCount=allocations.proposals.filter(p=>p.decision==='pending').length
+  const planningIssues=recommendationContext?lockedDesignIssues(recommendationContext,allocations.locks):[]
+  const canDistribute=distribution.sources.length>0&&Object.keys(distribution.assignments).length>0
+  const toolbarHint=serviceBusy?'Sedang menghitung layanan FAT…':distributionBusy?'Sedang menghitung distribusi…':recommendationBusy?'Sedang menyusun usulan alokasi…':editing?'Selesaikan atau batalkan mode editing sebelum menjalankan proses.':stage==='fat'?!features.length?'Impor data survei untuk memulai.':servicesStale?'Konfigurasi berubah. Hasil lama tetap tersedia; hitung ulang layanan.':!plan?'Gunakan default aplikasi untuk membuat kelompok dan kandidat FAT.':`${plan.unservedHomes.length} rumah belum terlayani · ${pendingCount} usulan perlu review.`:!canDistribute?'Pilih sumber dan tetapkan FAT pada aktivitas Distribusi.':distributionStale?'Koneksi atau assignment berubah. Hitung ulang distribusi.':distribution.result?`${distribution.result.summary.unreachableCount} FAT tidak terjangkau · ${distribution.result.summary.invalidCount} input bermasalah.`:'Siap menghitung jalur melalui koneksi tiang yang diizinkan.'
+  const projectTitle=importedFiles.length===1?importedFiles[0].name:importedFiles.length?`Proyek FTTH · ${importedFiles.length} file`:'Proyek FTTH'
+  return <div className="workspace bg-[#f7f9fb] text-slate-800">
+    <header className="workspace-header">
+      <div className="flex min-w-0 items-center gap-3"><span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white"><Cable className="size-5"/></span><div className="min-w-0"><h1 className="truncate text-sm font-semibold" title={projectTitle}>{projectTitle}</h1><p className="truncate text-[11px] text-slate-500">{!features.length?'Workspace perencanaan FTTH':dirty?'Perubahan belum disimpan':'Snapshot tersimpan · lokal / JSON'}</p></div></div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <details className="workspace-menu" onKeyDown={closeMenuOnEscape}><summary className="workspace-menu-trigger"><FolderOpen className="size-4"/><span>Buka</span></summary><div className="workspace-menu-body" onClick={event=>{const menu=event.currentTarget.closest("details");if(menu)menu.open=false}}><button onClick={openBrowserProject}>Buka simpanan browser</button><button onClick={()=>projectFileRef.current?.click()}>Buka proyek JSON</button><button disabled={importing} onClick={()=>fileRef.current?.click()}>Impor survei KML/KMZ</button></div></details>
+        <Button size="sm" onClick={saveProjectInBrowser} disabled={!features.length||distributionBusy||serviceBusy}><Save/>Simpan</Button>
+        <details className="workspace-menu" onKeyDown={closeMenuOnEscape}><summary className="workspace-menu-trigger"><Download className="size-4"/><span>Ekspor</span></summary><div className="workspace-menu-body" onClick={event=>{const menu=event.currentTarget.closest("details");if(menu)menu.open=false}}><button disabled={!features.length} onClick={exportGeoJSON}>Survei + distribusi GeoJSON</button><button onClick={()=>exportDistribution('geojson')}>Distribusi GeoJSON</button><button disabled={!distribution.result} onClick={()=>exportDistribution('csv')}>Rute CSV</button><button disabled={!features.length} onClick={downloadProject}>Snapshot proyek JSON</button></div></details>
+        <Button size="sm" variant="outline" aria-expanded={settingsOpen} onClick={()=>{setLayerSettingsOpen(false);setSettingsOpen(true)}}><Settings2/><span>Pengaturan</span></Button>
+      </div>
+      <input ref={fileRef} type="file" accept=".kml,.kmz" multiple disabled={importing} className="hidden" aria-label="Impor survei" onChange={e=>{if(e.target.files)importFiles(e.target.files);e.target.value=''}}/>
+      <input ref={projectFileRef} type="file" accept=".json,application/json" className="hidden" aria-label="Buka proyek JSON" onChange={e=>{const file=e.target.files?.[0];if(file)openProjectFile(file);e.target.value=''}}/>
     </header>
-    <div className="flex min-h-0 flex-1">
-      {!collapsed && <aside className="flex w-[294px] shrink-0 flex-col border-r bg-white">
-        <div className="flex items-center justify-between border-b px-4 py-3"><span className="text-xs font-semibold">Panel kontrol</span><Button variant="ghost" size="icon" onClick={() => setCollapsed(true)} aria-label="Lipat sidebar"><ChevronLeft /></Button></div>
-        <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-3">
-          <div className="relative"><Search className="absolute left-3 top-2.5 text-slate-400" /><Input className="pl-9 text-xs" placeholder="Cari nama atau ID..." value={query} onChange={event => setQuery(event.target.value)} /></div>
-          <ControlSection title="Data Impor" icon={<Upload className="size-4" />} caption={`${fileCount} file`} open={sections.data} onOpenChange={open => setSection("data", open)}>
-            <div className="flex gap-2"><Button size="sm" disabled={importing} onClick={() => fileRef.current?.click()}><Upload />{importing ? "Mengimpor..." : "Impor"}</Button><Button size="sm" variant="outline" disabled={!visible.length} onClick={exportGeoJSON}><Download />Ekspor</Button></div>
-            <dl className="grid grid-cols-2 gap-2 text-xs"><div><dt className="text-slate-400">File</dt><dd className="font-semibold">{fileCount}</dd></div><div><dt className="text-slate-400">Total fitur</dt><dd className="font-semibold">{features.length}</dd></div><div><dt className="text-slate-400">Panjang garis</dt><dd className="font-semibold">{features.length ? `${importedLength.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m` : "—"}</dd></div><div><dt className="text-slate-400">Status</dt><dd className="font-semibold">{features.length ? "Data dimuat" : "Kosong"}</dd></div></dl>
-            {importedFiles.length > 0 && <ul className="max-h-32 space-y-1 overflow-y-auto" aria-label="Daftar file impor">{importedFiles.map(file => <li key={file.name} className="flex min-w-0 items-center gap-2 rounded bg-slate-50 p-2 text-[11px]"><span className="min-w-0 flex-1 truncate" title={file.name}>{file.name}</span><span className="shrink-0 text-slate-400">{file.count} fitur</span></li>)}</ul>}
-          </ControlSection>
-          <ControlSection title="Planning Configuration" icon={<SlidersHorizontal className="size-4" />} caption={`${fatPorts} port`} open={sections.configuration} onOpenChange={open => setSection("configuration", open)}>
-            <label htmlFor="max-drop-length" className="block text-xs font-medium">Maksimum panjang drop (m)</label>
-            <Input id="max-drop-length" type="number" min="0" step="any" value={maxDropLengthMeters} disabled={importing} onChange={event => {
-              const value = Number(event.target.value)
-              try { validateMaxDropLengthMeters(value) } catch { return }
-              setMaxDropLengthMeters(value)
-              setPlanning(null)
-              setResultsOpen(false)
-              setSelectedGroupId(null)
-              setHighlightedGroupId(null)
-              setHoveredGroupId(null)
-            }} />
-            <p className="text-[11px] text-slate-500">50 m adalah nilai awal demo yang dapat diubah, bukan standar teknis. Konfigurasi selama sesi; perubahan menghapus hasil otomatis. Desain engineer terkunci dipertahankan dengan masalah bila tidak sesuai. Hitung ulang manual.</p>
-            <label htmlFor="max-fats-per-pole" className="block text-xs font-medium">Maksimum FAT per tiang</label>
-            <select id="max-fats-per-pole" value={maxFatsPerPole} disabled={importing} onChange={event=>{
-              const value=Number(event.target.value)
-              try {validateMaxFatsPerPole(value)} catch {return}
-              setMaxFatsPerPole(value)
-              setPlanning(previous=>previous?{...previous,result:{...previous.result,maxFatsPerPole:value}}:previous)
-              setPlacementError("")
-            }} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs">
-              {Array.from({length:MAX_FATS_PER_POLE},(_,index)=>index+1).map(value=><option key={value} value={value}>{value} FAT{value===DEFAULT_MAX_FATS_PER_POLE?" (default)":""}</option>)}
-            </select>
-            <p className="text-[11px] text-slate-500">Batas penambahan FAT: 1–10 per tiang, default 2. FAT lama dipertahankan jika batas diturunkan; periksa masalah rancangan.</p>
-            <label htmlFor="fat-port-count" className="block text-xs font-medium">Jumlah port FAT</label>
-            <select id="fat-port-count" value={fatPorts} disabled={importing} onChange={event => changeFatPorts(Number(event.target.value))} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">
-              {Array.from({ length: MAX_FAT_PORTS }, (_, index) => index + 1).map(value => <option key={value} value={value}>{value} port{value === DEFAULT_FAT_PORTS ? " (default)" : ""}</option>)}
-            </select>
-          </ControlSection>
-          <ControlSection title="Component" icon={<Cable className="size-4" />} caption="Tambah" open={sections.component} onOpenChange={open=>setSection("component",open)}>
-            <Button size="sm" variant={addingFat?"default":"outline"} disabled={importing||!features.some(feature=>feature.category==="Tiang")} onClick={beginFatPlacement}>FAT</Button>
-            <p className="text-[11px] text-slate-500">Pilih FAT, lalu klik tiang pada peta. Kapasitas FAT baru mengikuti konfigurasi port ({fatPorts} port).</p>
-          </ControlSection>
-          <ControlSection title="Perencanaan FTTH" icon={<Network className="size-4" />} caption={plan ? `${plan.groups.length} kelompok` : "Manual"} open={sections.planning} onOpenChange={open => setSection("planning", open)}>
-            <PlanningPanel plan={plan} selectedGroupId={selectedGroupId} highlightedGroupId={activeHighlight} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} hasData={features.length > 0} importing={importing} onRun={runPlanning} onSelectGroup={selectPlanningGroup} resultsOpen={resultsOpen} onResultsOpenChange={setResultsOpen} />
-            {recommendationContext && <AllocationPanel context={recommendationContext} state={allocations} onChange={changeAllocations} onAccept={approveAllocation} onFocus={focusProposal} issues={lockedDesignIssues(recommendationContext, allocations.locks)} />}
-          </ControlSection>
-          <ControlSection title="Layer & Kategori" icon={<Layers3 className="size-4" />} caption={`${Object.values(settings.layers).filter(layer => layer.visible).length}/${Object.keys(colors).length}`} open={sections.layers} onOpenChange={open => setSection("layers", open)}>
-            {(Object.keys(colors) as Category[]).map(cat => <button key={cat} aria-label={`${settings.layers[cat].visible ? "Sembunyikan" : "Tampilkan"} kategori ${cat}`} title={`${settings.layers[cat].visible ? "Sembunyikan" : "Tampilkan"} kategori ${cat}`} aria-pressed={settings.layers[cat].visible} onClick={() => setSettings(previous => ({ ...previous, layers: { ...previous.layers, [cat]: { ...previous.layers[cat], visible: !previous.layers[cat].visible } } }))} className="flex w-full items-center justify-between rounded-md px-2 py-2 text-xs hover:bg-slate-50"><span className="flex items-center gap-2">{cat === "Rumah" ? <House className="size-4" style={{ color: settings.layers[cat].color, opacity: settings.layers[cat].visible ? 1 : 0.3 }} aria-hidden="true" /> : cat === "Tiang" ? <UtilityPole className="size-4" style={{ color: settings.layers[cat].color, opacity: settings.layers[cat].visible ? 1 : 0.3 }} aria-hidden="true" /> : <i className="size-2.5 rounded-full" style={{ backgroundColor: settings.layers[cat].color, opacity: settings.layers[cat].visible ? 1 : 0.3 }} />}{cat}</span><span className="flex items-center gap-3"><span className="text-slate-400">{counts[cat]}</span>{settings.layers[cat].visible ? <Eye className="size-4 text-emerald-600" aria-hidden="true" /> : <EyeOff className="size-4 text-slate-400" aria-hidden="true" />}</span></button>)}
-          </ControlSection>
-          <ControlSection title="Tampilan & Alat" icon={<SlidersHorizontal className="size-4" />} open={sections.display} onOpenChange={open => setSection("display", open)}>
-            <Button size="sm" variant="outline" disabled={!settingsReady} onClick={() => setLayerSettingsOpen(true)}><Layers3 />Layer Settings</Button>
-            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={showLabels} onChange={event => setShowLabels(event.target.checked)} /> Label objek</label>
-            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={measureMode} onChange={event => setMeasureMode(event.target.checked)} /> Mode ukur jarak</label>
-            <div className="flex gap-2"><Input aria-label="Radius buffer dalam meter" value={bufferMeters} onChange={event => setBufferMeters(event.target.value)} className="h-8 text-xs" /><Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => addLogs([{ level: "warning", source: "Peta", title: "Pembuatan buffer belum tersedia", details: [{ label: "Objek", value: selected?.name || "Belum dipilih" }, { label: "Radius masukan", value: `${bufferMeters} m` }, { label: "Status", value: "Kontrol ini masih placeholder; belum ada geometri buffer yang dibuat." }] }])}>Buffer (m)</Button></div>
-          </ControlSection>
+    <section className="workspace-toolbar" aria-busy={serviceBusy||distributionBusy||recommendationBusy} aria-label="Toolbar perencanaan">
+      <div className="workspace-stage" aria-label="Tahap perencanaan"><button aria-pressed={stage==='fat'} onClick={()=>{setStage("fat");if(panelOpen)setActivity("fat")}}>Layanan FAT</button><button aria-pressed={stage==='distribution'} onClick={()=>{setStage("distribution");if(panelOpen)setActivity("distribution")}}>Distribusi</button></div>
+      {stage==='fat'?<>
+        <Button size="sm" disabled={!features.length||importing||serviceBusy||recommendationBusy||distributionBusy||editing} aria-describedby="toolbar-prerequisite" onClick={runPlanning}>{serviceBusy?<RefreshCw className="animate-spin"/>:<Play/>}{serviceBusy?'Menghitung layanan…':plan?'Hitung ulang layanan FAT':'Hitung kelompok & FAT'}</Button>
+        <Button size="sm" variant="outline" disabled={!plan||servicesStale||!plan.unservedHomes.length||recommendationBusy||serviceBusy||distributionBusy||editing} onClick={runRecommendations}>{recommendationBusy?'Menyusun usulan…':'Rekomendasikan alokasi'}</Button>
+      </>:<>
+        <Button size="sm" disabled={!canDistribute||distributionBusy||serviceBusy||recommendationBusy||importing||editing} aria-describedby="toolbar-prerequisite" onClick={generateDistributionRoutes}>{distributionBusy?<RefreshCw className="animate-spin"/>:<Play/>}{distributionBusy?'Menghitung distribusi…':distribution.result?'Hitung ulang distribusi':'Hitung jalur distribusi'}</Button>
+        <Button size="sm" variant="outline" onClick={()=>{setActivity('distribution');setPanelOpen(true)}}>Siapkan distribusi</Button>
+        <details className="workspace-menu" onKeyDown={closeMenuOnEscape}><summary className="workspace-menu-trigger">Aksi distribusi<ChevronDown className="size-3"/></summary><div className="workspace-menu-body" onClick={event=>{const menu=event.currentTarget.closest("details");if(menu)menu.open=false}}><button disabled={!distributionCtx.poles.length} onClick={startDistributionConnection}>Tambah koneksi tiang</button><button disabled={!distributionCtx.poles.length} onClick={suggestDistributionConnections}>Sarankan koneksi</button><button disabled={!distribution.result} onClick={()=>fitDistributionGeometries(distribution.result?.routes.flatMap(r=>r.geometry?[r.geometry]:[])||[])}>Fit hasil distribusi</button></div></details>
+      </>}
+      <p id="toolbar-prerequisite" className="workspace-toolbar-hint" role="status">{toolbarHint}</p>
+    </section>
+    <div className="workspace-body">
+      <nav className="workspace-nav" aria-label="Aktivitas workspace">{([{id:'data',label:'Data',icon:Database},{id:'fat',label:'FAT & Layanan',icon:Network},{id:'distribution',label:'Distribusi',icon:Route},{id:'inspection',label:'Pemeriksaan',icon:ListChecks}] as const).map(item=><button key={item.id} aria-pressed={activity===item.id&&(item.id==='inspection'?dockOpen:panelOpen)} onClick={()=>openActivity(item.id)}><item.icon className="size-5"/><span>{item.label}</span></button>)}</nav>
+      <div className="workspace-main">
+        <div className="workspace-row">
+          <aside className="workspace-explorer" hidden={!panelOpen} aria-label="Panel aktivitas">
+            <header className="flex items-center justify-between border-b p-3"><h2 className="text-sm font-semibold">{activity==='data'?'Data proyek':activity==='distribution'?'Distribusi':'FAT & Layanan'}</h2><Button size="icon-sm" variant="ghost" aria-label="Tutup panel aktivitas" onClick={closePanel}><PanelLeftClose/></Button></header>
+            <div className="workspace-explorer-content">
+              <section hidden={activity!=='data'} className="space-y-3"><div className="flex flex-wrap gap-2"><Button size="sm" disabled={importing} onClick={()=>fileRef.current?.click()}><Upload/>{importing?'Mengimpor…':'Impor survei'}</Button><Button size="sm" variant="outline" onClick={openBrowserProject}>Buka simpanan</Button><Button size="sm" variant="outline" onClick={()=>projectFileRef.current?.click()}>Buka JSON</Button></div><p className="text-xs text-slate-500">{fileCount} file · {features.length} objek · {importedLength.toLocaleString('id-ID',{maximumFractionDigits:1})} m garis survei</p><details><summary className="cursor-pointer text-xs">File survei</summary><ul className="mt-2 text-xs">{importedFiles.map(f=><li className="break-all" key={f.name}>{f.name} · {f.count} objek</li>)}</ul></details><ObjectExplorer key={`data-${projectSession}`} activity="data" features={features} plan={plan} selectedId={selected?.id||null} groupId={selectedGroupId} onSelect={selectSurveyObject} onSelectGroup={selectPlanningGroup}/></section>
+              <section hidden={activity!=='fat'} className="space-y-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={importing||servicesStale||serviceBusy||!features.some(f=>f.category==='Tiang')} onClick={beginFatPlacement}><Plus/>Tambah FAT pada tiang</Button><Button size="sm" variant="ghost" onClick={()=>openInspection('proposals')}>Review usulan ({pendingCount})</Button></div>{servicesStale&&<p className="rounded bg-amber-50 p-2 text-xs text-amber-800">Hasil layanan lama. Hitung ulang dari toolbar untuk menerapkan konfigurasi terbaru; keputusan manual tetap dikunci.</p>}<ObjectExplorer key={`fat-${projectSession}`} activity="fat" features={features} plan={plan} selectedId={selected?.id||null} groupId={selectedGroupId} onSelect={selectSurveyObject} onSelectGroup={selectPlanningGroup}/>{!selected&&selectedGroupId&&<><Button size="sm" variant="outline" onClick={()=>{const group=plan?.groups.find(g=>g.id===selectedGroupId);if(group?.candidate)fitDistributionGeometries([{type:'Point',coordinates:group.candidate.pole.coordinates}])}}><Crosshair/>Fokus lokasi FAT</Button><PlanningPanel view="detail" plan={plan} selectedGroupId={selectedGroupId} highlightedGroupId={activeHighlight} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} hasData={features.length>0} importing={importing} onRun={runPlanning} onSelectGroup={selectPlanningGroup} resultsOpen={resultsOpen} onResultsOpenChange={setResultsOpen}/></>}</section>
+              <section hidden={activity!=='distribution'}><DistributionPanel key={`distribution-${projectSession}`} workspace context={distributionCtx} state={distribution} onChange={changeDistribution} editor={distributionEditor} onStartConnection={startDistributionConnection} onCancelConnection={cancelDistributionConnection} onSaveConnection={saveDistributionConnection} busy={distributionBusy} onGenerate={generateDistributionRoutes} onFit={()=>fitDistributionGeometries(distribution.result?.routes.flatMap(r=>r.geometry?[r.geometry]:[])||[])} selectedRouteKey={distributionRouteKey} onSelectRoute={selectDistributionRoute} selectedSegmentId={distributionSegmentId} onSelectSegment={selectDistributionSegment} onFocusIssue={inspectDistributionIssue} onSaveProject={saveProjectInBrowser} onDownloadProject={downloadProject} onOpenSaved={openBrowserProject} onOpenProject={openProjectFile} onExport={exportDistribution} projectMessage=""/></section>
+              {selected&&(activity==='data'||activity==='fat')&&<SurveyDetails feature={selected} plan={plan} onClose={()=>setSelected(null)} onFocus={()=>{if(map)fitFeaturesOnMap(map,[selected])}} onConnect={beginFatSelection} nearestPole={nearestPole?{name:nearestPole.f.name,meters:nearestPole.d}:null} canConnect={!servicesStale&&!importing&&!serviceBusy} error={connectionError}/>}
+            </div>
+          </aside>
+          <main className="workspace-map" aria-label="Peta perencanaan">
+            <MapView features={addingFat||distributionEditor?features:visible} selectedFeature={selected} distribution={{context:distributionCtx,state:distribution,editor:distributionEditor,onPickPole:pickDistributionPole,selectedRouteKey:distributionRouteKey,selectedSegmentId:distributionSegmentId,onSelectSegment:selectDistributionSegment,onSelectRoute:selectDistributionRoute}} onSelect={selectSurveyObject} showLabels={showLabels} onReady={setMap} settings={settings} plan={plan} placementContext={placementContext} onPickPole={pickPoleForFat} selectingHome={selectingHome} onPickFat={pickFat} provisional={focusedProposal&&focusedProposal.decision==='pending'&&recommendationContext&&focusedProposal.revision===inputRevision(recommendationContext)?focusedProposal:null} onSelectProposal={focusProposal} highlightedGroupId={activeHighlight} onSelectGroup={selectPlanningGroup} onSelectHome={selectPlannedHome} onDisconnectHome={serviceBusy?undefined:disconnectPlannedHome} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup}/>
+            <div className="workspace-map-controls"><div className="flex flex-col gap-1"><Button size="icon" variant="secondary" aria-label="Perbesar peta" title="Perbesar peta" onClick={()=>map?.zoomIn()}>+</Button><Button size="icon" variant="secondary" aria-label="Perkecil peta" title="Perkecil peta" onClick={()=>map?.zoomOut()}>−</Button><Button size="icon" variant="secondary" aria-label="Fit data" title="Fit seluruh data" disabled={!features.length} onClick={fitData}><Crosshair/></Button></div><div className="flex flex-col items-end gap-1"><Button ref={layerSettingsButton} size="sm" variant="secondary" aria-expanded={layerSettingsOpen} onClick={()=>{cancelMode();setPanelOpen(false);setDockOpen(false);setLayerSettingsOpen(open=>!open)}}><Layers3/>Layer peta</Button><details className="workspace-legend"><summary>Legenda</summary><div>{(Object.keys(colors) as Category[]).map(category=><p className="flex items-center gap-2" key={category}><span className="size-2 rounded-full" style={{backgroundColor:settings.layers[category].color}}/>{category}</p>)}<p>Garis tebal biru: distribusi</p><p>Garis putus-putus: kandidat / hubungan layanan</p><label className="flex gap-1"><input type="checkbox" checked={showLabels} onChange={e=>setShowLabels(e.target.checked)}/>Label survei</label></div></details><Button size="sm" variant="secondary" disabled title="Pengumpulan titik ukur belum tersedia pada aplikasi"><Ruler/>Ukur jarak</Button></div></div>
+            <div className="workspace-mode"><span className="flex items-center gap-1"><Info className="size-3.5"/>{activeMode}</span>{(addingFat||selectingHome||distributionEditor)&&<Button size="sm" variant="outline" onClick={cancelMode}>Batal (Esc)</Button>}</div>
+            {!features.length&&<div className="workspace-empty"><h2 className="font-semibold">Mulai dari data survei</h2><p>Impor KML/KMZ atau buka snapshot proyek. Default aplikasi sudah siap digunakan.</p><div className="mt-3 flex justify-center gap-2"><Button size="sm" onClick={()=>fileRef.current?.click()}>Impor survei</Button><Button size="sm" variant="outline" onClick={openBrowserProject}>Buka proyek tersimpan</Button></div></div>}
+            {addingFat&&<section className="workspace-mode-card" aria-label="Tambah FAT pada tiang"><h2>Tambah FAT · pilih tiang</h2><p>Hanya tiang yang dapat diklik. Hijau: ruang tersedia; kuning: batas tercapai.</p><p>Maksimum {maxFatsPerPole} FAT per tiang · FAT baru {fatPorts} port.</p>{placementError&&<p role="alert" className="text-red-700">{placementError}</p>}<Button size="sm" variant="outline" onClick={cancelMode}>Batal menambah FAT</Button></section>}
+            {selectingHome&&<section className="workspace-mode-card" aria-label="Pilih FAT untuk rumah"><h2>Sambungkan {selectingHome.name}</h2><p>Pilih FAT dengan port tersedia. Batas drop {maxDropLengthMeters} m menggunakan estimasi jarak lurus.</p>{!plan?.groups.some(g=>g.candidate&&g.homes.length+(g.occupiedPorts||0)<(g.capacity??plan.fatPorts))&&<p>Tidak ada FAT dengan port tersedia.</p>}{connectionError&&<p role="alert" className="text-red-700">{connectionError}</p>}<Button size="sm" variant="outline" onClick={cancelMode}>Batal memilih FAT</Button></section>}
+            {distributionEditor&&<section className="workspace-mode-card" aria-label="Mode tambah koneksi"><h2>Tambah koneksi tiang</h2><p>{!distributionEditor.from?'Klik tiang asal.':!distributionEditor.to?'Klik tiang tujuan.':'Periksa preview dan konfirmasi pada panel Distribusi.'}</p><Button size="sm" variant="outline" onClick={cancelMode}>Batal koneksi</Button></section>}
+            {layerSettingsOpen&&<LayerSettingsPanel settings={settings} features={features} onChange={setSettings} onClose={()=>{setLayerSettingsOpen(false);layerSettingsButton.current?.focus()}}/>}
+          </main>
         </div>
-      </aside>}
-      <main className="relative min-w-0 flex-1"><MapView features={addingFat ? features : visible} onSelect={selectSurveyObject} showLabels={showLabels} onReady={setMap} settings={settings} plan={plan} placementContext={placementContext} onPickPole={pickPoleForFat} selectingHome={selectingHome} onPickFat={pickFat} provisional={focusedProposal && focusedProposal.decision === "pending" && recommendationContext && focusedProposal.revision === inputRevision(recommendationContext) ? focusedProposal : null} onSelectProposal={focusProposal} highlightedGroupId={activeHighlight} onSelectGroup={selectPlanningGroup} onSelectHome={selectPlannedHome} onDisconnectHome={disconnectPlannedHome} onHighlightGroup={highlightPlanningGroup} onHoverGroup={hoverPlanningGroup} />{addingFat && <section aria-label="Tambah FAT pada tiang" className="absolute bottom-4 left-4 z-[650] w-[min(360px,calc(100%-2rem))] space-y-2 rounded-xl border bg-white p-3 text-xs shadow-lg"><h2 className="font-semibold">Tambah FAT — pilih tiang</h2><p>Hanya tiang yang dapat diklik. Tiang hijau masih memiliki ruang; tiang kuning telah mencapai batas.</p><p>Maksimum {maxFatsPerPole} FAT per tiang · kapasitas FAT baru {fatPorts} port. Ini komponen simulasi; pemasangan dan upstream belum diverifikasi.</p>{!placementContext?.poles.length&&<p role="status">Tidak ada titik Tiang valid. Periksa data survei.</p>}{placementError&&<p role="alert" className="text-red-700">{placementError}</p>}<Button size="sm" variant="outline" onClick={()=>{setAddingFat(false);setPlacementError("")}}>Batal menambah FAT</Button></section>}{selectingHome && <section aria-label="Pilih FAT untuk rumah" className="absolute bottom-4 left-4 z-[650] w-[min(360px,calc(100%-2rem))] space-y-2 rounded-xl border bg-white p-3 text-xs shadow-lg"><h2 className="font-semibold">Sambungkan {selectingHome.name} ke FAT</h2><p>Klik FAT dengan port tersedia. Rumah lain, cluster dan FAT penuh disembunyikan sementara.</p><p>Estimasi jarak lurus · batas drop {plan?.maxDropLengthMeters} m. Lintasan pemasangan belum tervalidasi.</p>{!plan?.groups.some(g=>g.candidate&&g.homes.length+(g.occupiedPorts||0)<(g.capacity??plan.fatPorts))&&<p role="status">Tidak ada FAT dengan port tersedia. Batalkan untuk kembali ke peta.</p>}{connectionError&&<p role="alert" className="text-red-700">{connectionError}</p>}<Button size="sm" variant="outline" onClick={()=>{setConnectionSelection(null);setConnectionError("")}}>Batal memilih FAT</Button></section>}{!features.length && <div role="status" className="pointer-events-none absolute bottom-4 left-4 right-4 z-[500] rounded-lg border bg-white/95 p-4 text-center text-sm shadow-sm"><p className="font-semibold">Belum ada data survei</p><p className="mt-1 text-xs text-slate-500">Klik Impor Data untuk memuat file KML atau KMZ Anda.</p></div>}<div className="absolute left-4 top-4 z-[500] flex flex-col gap-1"><Button size="icon" variant="secondary" onClick={() => map?.zoomIn()} aria-label="Perbesar">+</Button><Button size="icon" variant="secondary" onClick={() => map?.zoomOut()} aria-label="Perkecil">−</Button></div>{collapsed && <Button className="absolute bottom-24 left-4 z-[500]" variant="secondary" size="icon" onClick={() => setCollapsed(false)} aria-label="Buka sidebar"><ChevronRight /></Button>}<div className="absolute right-2 top-4 z-[700] flex flex-wrap justify-end gap-2 sm:right-4"><Button ref={layerSettingsButton} size="sm" variant="secondary" disabled={!settingsReady} aria-expanded={layerSettingsOpen} aria-controls="layer-settings-panel" onClick={() => setLayerSettingsOpen(open => !open)}><Layers3 /> Layer Settings</Button><Button size="sm" variant="secondary" onClick={() => { setMeasureMode(true); addLogs([{ level: "warning", source: "Peta", title: "Mode ukur jarak belum lengkap", details: [{ label: "Status", value: "Pengumpulan titik klik peta belum tersambung. Belum ada hasil pengukuran yang dihitung." }] }]) }}><Ruler data-icon="inline-start" /> Ukur Jarak</Button><Button size="sm" variant="secondary" disabled={!features.length} onClick={fitData}><Crosshair data-icon="inline-start" /> Fit</Button></div>{layerSettingsOpen && <LayerSettingsPanel settings={settings} features={features} onChange={setSettings} onClose={() => { setLayerSettingsOpen(false); layerSettingsButton.current?.focus() }} />}{!addingFat && !selectingHome && selected && (settings.layers[selected.category].visible || plan?.groups.some(group => group.homes.some(home => home.id === selected.id)) || plan?.unservedHomes.some(item => item.home.id === selected.id)) && <section aria-label="Informasi objek survei" className="absolute bottom-4 right-4 z-[500] max-h-[calc(100%-6rem)] w-[310px] overflow-y-auto rounded-xl border bg-white p-4 shadow-xl"><div className="flex items-start justify-between"><div><Badge style={{ backgroundColor: colors[selected.category], color: "white" }}>{selected.category}</Badge><h2 className="mt-2 text-sm font-bold">{selected.name}</h2><p className="mt-1 font-mono text-[10px] text-slate-400">ID: {selected.id}</p></div><Button variant="ghost" size="icon" onClick={() => setSelected(null)}><X /></Button></div><Separator className="my-3" />{selectedUnserved && <div className="mb-3 space-y-2 rounded border bg-emerald-50 p-2 text-xs"><p>Rumah belum memiliki layanan FAT / cluster.</p><Button size="sm" disabled={importing} onClick={beginFatSelection}>Sambungkan ke FAT</Button>{connectionError && <p role="alert" className="text-red-700">{connectionError}</p>}</div>}<div className="flex flex-col gap-2 text-xs"><div className="flex justify-between"><span className="text-slate-400">{selected.kind === "Point" ? "Latitude, Longitude" : "Titik awal (Lat, Lon)"}</span><span className="font-mono">{selected.coords[0].toFixed(6)}, {selected.coords[1].toFixed(6)} <button onClick={() => navigator.clipboard.writeText(`${selected.coords[0]}, ${selected.coords[1]}`)}><Copy className="inline size-3" /></button></span></div><div className="flex justify-between"><span className="text-slate-400">Sumber file</span><span>{selected.file}</span></div><div className="flex justify-between gap-2"><span className="text-slate-400">KML / Geometri</span><span className="break-all text-right">{selected.kmlFile} · {selected.kind}</span></div>{selected.props && Object.keys(selected.props).length > 0 && <details open className="mt-2 border-t pt-2"><summary className="cursor-pointer font-semibold">Atribut objek KMZ/KML</summary><dl className="mt-2 space-y-2">{Object.entries(selected.props).map(([key, value]) => <div key={key} className="rounded bg-slate-50 p-2"><dt className="break-all font-medium text-slate-500">{key}</dt><dd className="mt-1 whitespace-pre-wrap break-words">{value === null || value === undefined ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value)}</dd></div>)}</dl></details>}{nearestPole && <div className="rounded-md bg-emerald-50 p-2 text-emerald-700">Tiang terdekat: <b>{nearestPole.f.name}</b><br />Jarak garis lurus: {nearestPole.d.toFixed(1)} m</div>}</div></section>}</main>
-    </div><ApplicationLog entries={logs} /><footer className="flex h-7 shrink-0 items-center justify-between border-t bg-white px-4 text-[10px] text-slate-400"><span>Koordinat kursor: —</span><span>{displayed.length} fitur terlihat</span><span>{baseMaps[settings.baseMap].provider}</span></footer>
+        <InspectionPanel plan={plan} context={distributionCtx} distribution={distribution} serviceStale={servicesStale} busy={serviceBusy} distributionBusy={distributionBusy} issues={planningIssues} pendingCount={pendingCount} open={dockOpen} tab={inspectionTab} onToggle={()=>setDockOpen(open=>!open)} onTab={setInspectionTab} onHouse={inspectHouse} onRoute={selectDistributionRoute} onIssue={inspectDistributionIssue} selectedRouteKey={distributionRouteKey} proposals={recommendationContext?<AllocationPanel key={`allocations-${projectSession}`} hideGenerate disabled={servicesStale||serviceBusy} selectedProposalId={focusedProposal?.id} context={recommendationContext} state={allocations} onChange={changeAllocations} onAccept={approveAllocation} onFocus={focusProposal} onFit={fitProposal} issues={[]}/>:<p>Hitung layanan FAT dari toolbar untuk menyiapkan usulan alokasi.</p>} logs={<ApplicationLog entries={logs} defaultOpen/>}/>
+      </div>
+    </div>
+    <footer className="workspace-footer"><span className="min-w-0 flex-1 truncate" role="status" title={projectMessage}>{projectMessage||`${displayed.length} fitur terlihat · ${activeMode}`}</span><span>{baseMaps[settings.baseMap].provider}</span></footer>
+    {settingsOpen&&<WorkspaceSettings configuration={configuration} onApply={applyConfiguration} onClose={()=>setSettingsOpen(false)}/>}
   </div>
 }

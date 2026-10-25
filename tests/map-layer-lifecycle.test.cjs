@@ -17,6 +17,15 @@ function load(filename, overrides = {}) {
 require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, filename)
 const preferences = require('../lib/layer-settings.ts')
 const survey = require('../lib/survey.ts')
+const workspaceOverrides={
+  '@/components/layer-settings':{LayerSettingsPanel:'LayerSettingsPanel'},
+  '@/components/workspace-settings':{WorkspaceSettings:'WorkspaceSettings'},
+  '@/components/object-explorer':{ObjectExplorer:'ObjectExplorer'},
+  '@/components/survey-details':{SurveyDetails:'SurveyDetails'},
+  '@/components/inspection-panel':{InspectionPanel:'InspectionPanel'},
+  '@/lib/workspace':require('../lib/workspace.ts'),
+}
+
 
 function hooks() {
   let cursor = 0
@@ -81,6 +90,7 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     const { default: MapView } = load('../components/map-view.tsx', { react: harness.react, 'react-leaflet': { MapContainer: 'MapContainer', TileLayer: 'TileLayer', useMap: () => map }, leaflet, '@/components/recommendation-map-layer': { RecommendationMapLayer: 'RecommendationMapLayer' },
       '@/components/fat-selection-layer': { FatSelectionLayer: 'FatSelectionLayer' },
       '@/components/pole-placement-layer': { PolePlacementLayer: 'PolePlacementLayer' },
+      '@/components/distribution-map-layers': { DistributionMapLayers: 'DistributionMapLayers' },
       '@/components/planning-map-layers': { PlanningMapLayers: () => null }, '@/lib/survey': survey, '@/lib/layer-settings': preferences, 'leaflet/dist/leaflet.css': {} })
     const item = { id: 'house', name: '001', category: 'Rumah', geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }
     const line = { ...item, id: 'line', geometry: { type: 'LineString', coordinates: [[107, -6], [108, -6]] } }
@@ -360,7 +370,7 @@ test('log drawer stays collapsed on new messages and opens details only on user 
   const originalDocument = global.document
   let focused = false
   global.document = { querySelector: () => ({ focus: () => { focused = true } }) }
-  try { body.props.onKeyDown({ key: 'Escape' }) } finally { global.document = originalDocument }
+  try { body.props.onKeyDown({ key: 'Escape', stopPropagation() {} }) } finally { global.document = originalDocument }
   tree = harness.render(() => ApplicationLog({ entries }))
   assert.equal(tree.props.children[0].props['aria-expanded'], false)
   assert(focused)
@@ -368,21 +378,25 @@ test('log drawer stays collapsed on new messages and opens details only on user 
 })
 
 
-test('FAT configuration is applied only after manual planning and dropdown navigation preserves results', async () => {
+test('workspace keeps process actions visible, applies settings without losing results or manual edits, and supports FAT workflows', async () => {
   const planning = require('../lib/ftth-planning.ts')
   const applicationLog = require('../lib/application-log.ts')
   const harness = hooks()
   const recordedLogs = []
   const runs = []
-  const data = [...Array.from({ length: 51 }, (_, index) => ({ id: `h${index}`, name: `h${index}`, category: 'Rumah', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107 + index * 0.000005], geometry: { type: 'Point', coordinates: [107 + index * 0.000005, -6] }, props: {} })), { id: 'p', name: 'pole', category: 'Tiang', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107], geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }]
+  const data = [...Array.from({ length: 9 }, (_, index) => ({ id: `h${index}`, name: `h${index}`, category: 'Rumah', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107 + index * 0.0001], geometry: { type: 'Point', coordinates: [107 + index * 0.0001, -6] }, props: {} })), { id: 'p', name: 'pole', category: 'Tiang', file: 'test.kml', kmlFile: 'test.kml', kind: 'Point', coords: [-6, 107], geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }]
   const addLogs = logs => recordedLogs.push(...logs)
   const layerSettings = preferences.defaultLayerSettings()
   const overrides = {
+    ...workspaceOverrides,
     react: harness.react,
     'next/dynamic': () => 'MapView',
     '@/lib/import-survey': { importSurveyFile: async () => ({ features: data, warnings: [], metadataWarnings: [], geometryWarnings: [] }), ImportSurveyError: class extends Error {} },
     '@/lib/survey': survey,
     '@/lib/application-log': applicationLog,
+    '@/components/distribution-panel': { DistributionPanel: 'DistributionPanel' },
+    '@/lib/distribution': require('../lib/distribution.ts'),
+    '@/lib/ftth-project': require('../lib/ftth-project.ts'),
     '@/lib/allocation-recommendations': require('../lib/allocation-recommendations.ts'),
     '@/components/allocation-panel': { AllocationPanel: 'AllocationPanel' },
     '@/lib/ftth-planning': { ...planning, planFtth: (features, capacity, limit) => { runs.push(capacity); return planning.planFtth(features, capacity, limit) } },
@@ -405,140 +419,76 @@ test('FAT configuration is applied only after manual planning and dropdown navig
     if (predicate(node)) return node
     return find(node.props?.children, predicate)
   }
-  const config = tree => find(tree, node => node.props?.id === 'fat-port-count')
-  const panel = tree => find(tree, node => node.type === 'PlanningPanel')
-  const section = (tree, title) => find(tree, node => node.type === 'ControlSection' && node.props.title === title)
-  let tree = harness.render(Viewer)
-  assert.equal(config(tree).props.value, 8)
-  const options = config(tree).props.children
-  assert.equal(options.length, 25)
-  assert.equal(options[0].props.value, 1)
-  assert.equal(options.at(-1).props.value, 25)
-  assert.equal(section(tree, 'Data Impor').props.open, false)
-  assert.equal(section(tree, 'Layer & Kategori').props.open, false)
-  config(tree).props.onChange({ target: { value: '25' } })
-  tree = harness.render(Viewer)
-  assert.equal(config(tree).props.value, 25)
-  assert.deepEqual(runs, [])
-  const importer = find(tree, node => node.type === 'input' && node.props.type === 'file')
-  await importer.props.onChange({ target: { files: [{ name: 'test.kml' }] } })
-  tree = harness.render(Viewer)
-  assert.equal(panel(tree).props.plan, null)
-  assert.deepEqual(runs, [])
-  find(tree,node=>node.type==='button'&&node.props.children==='FAT').props.onClick();tree=harness.render(Viewer)
-  const initialPlacement=find(tree,node=>node.type==='MapView').props.placementContext
-  assert.equal(initialPlacement.poles.length,1)
-  assert.equal(initialPlacement.plan.groups.length,0)
-  find(tree,node=>node.type==='button'&&node.props.children==='Batal menambah FAT').props.onClick();tree=harness.render(Viewer)
-  assert.equal(find(tree,node=>node.type==='MapView').props.placementContext,null)
-  assert.equal(panel(tree).props.plan,null)
-  panel(tree).props.onRun()
-  tree = harness.render(Viewer)
-  assert.deepEqual(runs, [25])
-  assert.equal(panel(tree).props.plan.fatPorts, 25)
-  assert.equal(panel(tree).props.plan.maxDropLengthMeters, 50)
-  assert.equal(panel(tree).props.plan.groups.length, 3)
-  assert.equal(panel(tree).props.resultsOpen, true)
-  const firstPlan = panel(tree).props.plan
-  section(tree, 'Perencanaan FTTH').props.onOpenChange(false)
-  tree = harness.render(Viewer)
-  assert.equal(section(tree, 'Perencanaan FTTH').props.open, false)
-  const cameraChanges = []
-  find(tree, node => node.type === 'MapView').props.onReady({
-    fitBounds: (...args) => cameraChanges.push(args),
-    invalidateSize() {},
-  })
-  tree = harness.render(Viewer)
-  cameraChanges.length = 0 // Import fitting remains separate from FAT selection.
-  find(tree, node => node.type === 'MapView').props.onSelectGroup('G001')
-  tree = harness.render(Viewer)
-  assert.equal(section(tree, 'Perencanaan FTTH').props.open, true)
-  assert.equal(panel(tree).props.selectedGroupId, 'G001')
-  assert.deepEqual(cameraChanges, [])
-  find(tree, node => node.type === 'MapView').props.onSelectGroup('G001')
-  tree = harness.render(Viewer)
-  assert.deepEqual(cameraChanges, [])
-  section(tree, 'Layer & Kategori').props.onOpenChange(true)
-  section(tree, 'Data Impor').props.onOpenChange(true)
-  tree = harness.render(Viewer)
-  assert.equal(panel(tree).props.plan, firstPlan)
-  assert.deepEqual(runs, [25])
-  config(tree).props.onChange({ target: { value: '16' } })
-  tree = harness.render(Viewer)
-  assert.equal(panel(tree).props.plan, null)
-  assert.equal(panel(tree).props.resultsOpen, false)
-  assert.deepEqual(runs, [25])
-  panel(tree).props.onRun()
-  tree = harness.render(Viewer)
-  assert.deepEqual(runs, [25, 16])
-  assert.equal(panel(tree).props.plan.fatPorts, 16)
-  assert.equal(panel(tree).props.plan.groups.length, 4)
-  assert.equal(firstPlan.fatPorts, 25)
-  assert(recordedLogs.some(entry => entry.source === 'Planning Configuration'))
-  const dropInput = find(tree, node => node.props?.id === 'max-drop-length')
-  dropInput.props.onChange({ target: { value: '10' } })
-  tree = harness.render(Viewer)
-  assert.equal(panel(tree).props.plan, null)
-  panel(tree).props.onRun()
-  tree = harness.render(Viewer)
-  assert.equal(panel(tree).props.plan.maxDropLengthMeters, 10)
-  assert(panel(tree).props.plan.unservedHomes.length > 0)
-  const mapView = tree => find(tree, node=>node.type==='MapView')
-  const connectButton = tree => find(tree,node=>node.type==='button'&&node.props.children==='Sambungkan ke FAT')
-  const cancelButton = tree => find(tree,node=>node.type==='button'&&node.props.children==='Batal memilih FAT')
-  mapView(tree).props.onSelect(data[50]);tree=harness.render(Viewer)
-  assert(connectButton(tree))
-  connectButton(tree).props.onClick();tree=harness.render(Viewer)
-  assert.equal(mapView(tree).props.selectingHome.id,'h50')
-  const beforeRejected=panel(tree).props.plan
-  mapView(tree).props.onPickFat('G002');tree=harness.render(Viewer)
-  assert.equal(panel(tree).props.plan,beforeRejected)
-  assert.equal(mapView(tree).props.selectingHome.id,'h50')
-  assert(find(tree,node=>node.props?.role==='alert'&&String(node.props.children).includes('melebihi batas drop')))
-  cancelButton(tree).props.onClick();tree=harness.render(Viewer)
-  assert.equal(mapView(tree).props.selectingHome,null)
-  mapView(tree).props.onSelect(data[1]);tree=harness.render(Viewer)
-  assert.equal(connectButton(tree),null) // Served homes cannot enter the picker.
-  mapView(tree).props.onDisconnectHome('G001','h0');tree=harness.render(Viewer)
-  mapView(tree).props.onSelect(data[0]);tree=harness.render(Viewer)
-  connectButton(tree).props.onClick();tree=harness.render(Viewer)
-  assert.equal(mapView(tree).props.selectingHome.id,'h0')
-  const previousPorts=panel(tree).props.plan.groups.find(g=>g.id==='G002').homes.length
-  cameraChanges.length=0
-  mapView(tree).props.onPickFat('G002');tree=harness.render(Viewer)
-  assert.equal(mapView(tree).props.selectingHome,null)
-  const updated=panel(tree).props.plan
-  assert.equal(updated.groups.find(g=>g.id==='G002').homes.length,previousPorts+1)
-  assert.equal(updated.groups.flatMap(g=>g.homes).filter(h=>h.id==='h0').length,1)
-  assert(!updated.unservedHomes.some(item=>item.home.id==='h0'))
-  assert.deepEqual(cameraChanges,[])
-  panel(tree).props.onRun();tree=harness.render(Viewer)
-  assert(panel(tree).props.plan.groups.find(g=>g.id==='G002').homes.some(h=>h.id==='h0'))
-  const limitControl=tree=>find(tree,node=>node.props?.id==='max-fats-per-pole')
-  assert.equal(limitControl(tree).props.value,2)
-  assert.equal(limitControl(tree).props.children.length,10)
-  section(tree,'Component').props.onOpenChange(true);tree=harness.render(Viewer)
-  find(tree,node=>node.type==='button'&&node.props.children==='FAT').props.onClick();tree=harness.render(Viewer)
-  assert(mapView(tree).props.placementContext)
-  const beforeInstall=panel(tree).props.plan
-  mapView(tree).props.onPickPole('p');tree=harness.render(Viewer)
-  assert.equal(panel(tree).props.plan,beforeInstall)
-  assert(find(tree,node=>node.props?.role==='alert'&&String(node.props.children).includes('batas 2')))
-  limitControl(tree).props.onChange({target:{value:'3'}});tree=harness.render(Viewer)
-  const beforeDevices=panel(tree).props.plan.groups.length
-  cameraChanges.length=0
-  mapView(tree).props.onPickPole('p');tree=harness.render(Viewer)
-  assert.equal(mapView(tree).props.placementContext,null)
-  assert.equal(panel(tree).props.plan.groups.length,beforeDevices+1)
-  const manual=panel(tree).props.plan.groups.at(-1)
-  assert.equal(manual.homes.length,0)
-  assert.equal(manual.capacity,16)
-  assert.equal(manual.locked,true)
-  assert.deepEqual(cameraChanges,[])
-  panel(tree).props.onRun();tree=harness.render(Viewer)
-  assert(panel(tree).props.plan.groups.some(g=>g.candidate?.id===manual.candidate.id))
-  limitControl(tree).props.onChange({target:{value:'1'}});tree=harness.render(Viewer)
-  assert(panel(tree).props.plan.groups.some(g=>g.candidate?.id===manual.candidate.id))
+  function text(node){if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+  const button=(tree,label)=>find(tree,node=>node.type==='button'&&text(node)===label)
+  const mapView=tree=>find(tree,node=>node.type==='MapView').props
+  const plan=tree=>mapView(tree).plan
+  const inspect=tree=>find(tree,node=>node.type==='InspectionPanel').props
+  const settings=tree=>find(tree,node=>node.type==='WorkspaceSettings')?.props
+  let tree=harness.render(Viewer)
+  assert.equal(settings(tree),undefined)
+  assert.equal(find(tree,node=>node.type==='aside').props.hidden,true)
+  assert.equal(button(tree,'Hitung kelompok & FAT').props.disabled,true)
+  button(tree,'Pengaturan').props.onClick();tree=harness.render(Viewer)
+  assert.equal(settings(tree).configuration.fatPorts,8)
+  assert.equal(settings(tree).configuration.maxDropLengthMeters,50)
+  settings(tree).onClose();tree=harness.render(Viewer)
+  await find(tree,node=>node.type==='input'&&node.props['aria-label']==='Impor survei').props.onChange({target:{files:[{name:'test.kml'}],value:''}});tree=harness.render(Viewer)
+  const process=button(tree,'Hitung kelompok & FAT').props.onClick
+  const firstRun=process();tree=harness.render(Viewer)
+  assert.equal(button(tree,'Menghitung layanan…').props.disabled,true)
+  await process();await firstRun;tree=harness.render(Viewer)
+  assert.deepEqual(runs,[8])
+  assert.equal(inspect(tree).open,true)
+  assert(plan(tree).unservedHomes.length>0)
+  const camera=[]
+  mapView(tree).onReady({fitBounds:(...args)=>camera.push(args),invalidateSize(){}});tree=harness.render(Viewer);camera.length=0
+  const firstGroup=plan(tree).groups[0].id
+  mapView(tree).onSelectGroup(firstGroup);tree=harness.render(Viewer)
+  assert.equal(find(tree,node=>node.type==='PlanningPanel').props.selectedGroupId,firstGroup)
+  assert.deepEqual(camera,[])
+  mapView(tree).onDisconnectHome(firstGroup,'h0');tree=harness.render(Viewer)
+  const before=structuredClone(plan(tree))
+  button(tree,'Pengaturan').props.onClick();tree=harness.render(Viewer)
+  settings(tree).onApply({...settings(tree).configuration,maxDropLengthMeters:20});tree=harness.render(Viewer)
+  assert.equal(settings(tree),undefined)
+  assert.equal(plan(tree).maxDropLengthMeters,50)
+  assert.deepEqual(plan(tree).groups,before.groups)
+  assert.equal(inspect(tree).serviceStale,true)
+  assert.equal(button(tree,'Rekomendasikan alokasi').props.disabled,true)
+  await button(tree,'Hitung ulang layanan FAT').props.onClick();tree=harness.render(Viewer)
+  assert.equal(plan(tree).maxDropLengthMeters,20)
+  assert.equal(inspect(tree).serviceStale,false)
+  assert(plan(tree).unservedHomes.some(item=>item.home.id==='h0'))
+  assert(plan(tree).groups.find(g=>g.id===firstGroup).locked)
+  mapView(tree).onSelect(data[8]);tree=harness.render(Viewer)
+  const details=()=>find(tree,node=>node.type==='SurveyDetails').props
+  assert(details().canConnect)
+  details().onConnect();tree=harness.render(Viewer)
+  const beforeRejected=structuredClone(plan(tree))
+  mapView(tree).onPickFat(firstGroup);tree=harness.render(Viewer)
+  assert.deepEqual(plan(tree),beforeRejected)
+  assert(find(tree,node=>node.props?.role==='alert'&&text(node).includes('melebihi batas drop')))
+  button(tree,'Batal memilih FAT').props.onClick();tree=harness.render(Viewer)
+  mapView(tree).onSelect(data[0]);tree=harness.render(Viewer)
+  details().onConnect();tree=harness.render(Viewer)
+  mapView(tree).onPickFat(firstGroup);tree=harness.render(Viewer)
+  assert.equal(mapView(tree).selectingHome,null)
+  assert.equal(plan(tree).groups.flatMap(g=>g.homes).filter(h=>h.id==='h0').length,1)
+  assert.deepEqual(camera,[])
+  button(tree,'Tambah FAT pada tiang').props.onClick();tree=harness.render(Viewer)
+  mapView(tree).onPickPole('p');tree=harness.render(Viewer)
+  assert.equal(plan(tree).groups.length,2)
+  button(tree,'Tambah FAT pada tiang').props.onClick();tree=harness.render(Viewer)
+  mapView(tree).onPickPole('p');tree=harness.render(Viewer)
+  assert(find(tree,node=>node.props?.role==='alert'&&text(node).includes('batas 2')))
+  button(tree,'Batal menambah FAT').props.onClick();tree=harness.render(Viewer)
+  button(tree,'Pemeriksaan').props.onClick();tree=harness.render(Viewer)
+  assert.equal(inspect(tree).tab,'issues')
+  inspect(tree).onHouse('h8');tree=harness.render(Viewer)
+  assert.equal(find(tree,node=>node.type==='SurveyDetails').props.feature.id,'h8')
+  assert.equal(inspect(tree).open,false)
+  assert(recordedLogs.some(entry=>entry.source==='Perencanaan manual'))
 })
 
 test('collapsible control sections report user toggles without duplicate state updates', () => {
@@ -659,4 +609,193 @@ test('pole placement highlights available and full poles with counts and preserv
     markers[1].events.click();assert.deepEqual(picked,['p2'])
     harness.cleanup();assert.equal(map.layers.size,0)
   } finally {global.document=previousDocument}
+})
+
+test('distribution UI journey: source, targets, explicit links, route, block, regenerate, save and reopen preserve house design',async()=>{
+  const d=require('../lib/distribution.ts'),project=require('../lib/ftth-project.ts'),planning=require('../lib/ftth-planning.ts')
+  const previousStorage=global.localStorage,storage=new Map()
+  global.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)}
+  try{
+    const pointFeature=(id,category,x,y=0,props={})=>({id,name:id,category,file:'distribution-demo.kml',kmlFile:'doc.kml',kind:'Point',geometry:{type:'Point',coordinates:[x,y]},coords:[y,x],props})
+    const data=[pointFeature('a','Tiang',0),pointFeature('b','Tiang',.001),pointFeature('c','Tiang',.002),pointFeature('e','Tiang',.001,.001),pointFeature('fdt','FDT',0),pointFeature('survey-c','FAT',.002,0,{POLE_ID:'c'}),pointFeature('survey-e','FAT',.001,.001,{POLE_ID:'e'}),pointFeature('home','Rumah',.00001)]
+    const harness=hooks(),child=hooks(),camera=[]
+    const {default:Viewer}=load('../components/ftth-viewer.tsx',{
+      ...workspaceOverrides,react:harness.react,'next/dynamic':()=> 'MapView','@/lib/import-survey':{importSurveyFile:async()=>({features:data,warnings:[],metadataWarnings:[],geometryWarnings:[]}),ImportSurveyError:class extends Error{}},
+      '@/lib/survey':survey,'@/lib/layer-settings':preferences,'@/lib/ftth-planning':planning,'@/lib/distribution':d,'@/lib/ftth-project':project,'@/lib/allocation-recommendations':require('../lib/allocation-recommendations.ts'),
+      '@/lib/application-log':require('../lib/application-log.ts'),'@/hooks/use-application-log':{useApplicationLog:()=>({entries:[],addLogs(){}})},'@/hooks/use-layer-settings':{useLayerSettings:()=>({settings:preferences.defaultLayerSettings(),setSettings(){},ready:true,storageError:false})},
+      '@/components/distribution-panel':{DistributionPanel:'DistributionPanel'},'@/components/planning-panel':{PlanningPanel:'PlanningPanel'},'@/components/allocation-panel':{AllocationPanel:'AllocationPanel'},'@/components/application-log':{ApplicationLog:'ApplicationLog'},'@/components/control-section':{ControlSection:'ControlSection'},'@/components/layer-settings':{LayerSettingsPanel:'LayerSettingsPanel'},'@/components/ui/button':{Button:'button'},'@/components/ui/input':{Input:'input'},'@/components/ui/badge':{Badge:'span'},'@/components/ui/separator':{Separator:'hr'},
+    })
+    const {DistributionPanel}=load('../components/distribution-panel.tsx',{react:child.react,'@/lib/distribution':d,'./ui/button':{Button:'button'},'./ui/input':{Input:'input'}})
+    function find(node,predicate){if(!node||typeof node!=='object')return null;if(Array.isArray(node)){for(const n of node){const hit=find(n,predicate);if(hit)return hit}return null}return predicate(node)?node:find(node.props?.children,predicate)}
+    function text(node){if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+    let tree,panel
+    const render=()=>{tree=harness.render(Viewer);const props=find(tree,n=>n.type==='DistributionPanel').props;panel=child.render(()=>DistributionPanel(props));return props}
+    const button=name=>find(panel,n=>n.type==='button'&&text(n)===name)
+    const input=name=>find(panel,n=>n.props?.['aria-label']===name)
+    const mapProps=()=>find(tree,n=>n.type==='MapView').props
+    render()
+    await find(tree,n=>n.type==='input'&&n.props.type==='file').props.onChange({target:{files:[{name:'demo.kml'}]}});render()
+    await find(tree,n=>n.type==='button'&&text(n)==='Hitung kelompok & FAT').props.onClick();render()
+    mapProps().onReady({fitBounds:(...args)=>camera.push(args),invalidateSize(){}});render()
+    const before=JSON.stringify(mapProps().plan)
+    input('Nama sumber baru').props.onChange({target:{value:'FDT demo'}});render()
+    input('Jenis sumber distribusi').props.onChange({target:{value:'fdt'}});render()
+    input('Tiang akses sumber baru').props.onChange({target:{value:'a'}});render()
+    button('Simpan sumber').props.onClick();render()
+    assert.equal(mapProps().distribution.state.sources[0].kind,'FDT')
+    button('Tetapkan semua FAT aktif').props.onClick();render()
+    assert.equal(Object.keys(mapProps().distribution.state.assignments).length,3)
+    for(const [from,to] of [['a','b'],['b','c'],['b','e']]){
+      button('Tambah koneksi').props.onClick();render()
+      mapProps().distribution.onPickPole(from);render();mapProps().distribution.onPickPole(to);render()
+      assert(text(panel).includes('Preview garis lurus:'))
+      const label=find(panel,n=>n.type==='label'&&text(n).includes('Izin/lintasan telah diperiksa engineer'))
+      find(label,n=>n.type==='input').props.onChange({target:{checked:true}});render()
+      button('Konfirmasi simpan koneksi').props.onClick();render()
+    }
+    assert.equal(mapProps().distribution.state.connections.length,3)
+    let props=render();await props.onGenerate();render()
+    assert.equal(mapProps().distribution.state.result.summary.successCount,3)
+    camera.length=0
+    const route=mapProps().distribution.state.result.routes.find(r=>r.fatId==='SURVEY-FAT:survey-c')
+    mapProps().distribution.onSelectRoute(route.key);render()
+    assert.equal(mapProps().distribution.selectedRouteKey,route.key);assert.equal(camera.length,1)
+    const segment=mapProps().distribution.state.connections.find(s=>s.from==='a'&&s.to==='b')
+    mapProps().distribution.onSelectSegment(segment.id);render()
+    input('Status izin segmen').props.onChange({target:{value:'blocked'}});render()
+    assert(d.distributionIsStale(mapProps().distribution.context,mapProps().distribution.state))
+    assert(find(tree,n=>n.type==='InspectionPanel').props.distribution.result)
+    props=render();await props.onGenerate();render()
+    assert.equal(mapProps().distribution.state.result.summary.unreachableCount,2)
+    props=render();props.onSaveProject();render()
+    assert(storage.has(project.PROJECT_STORAGE_KEY))
+    input('Status izin segmen').props.onChange({target:{value:'allowed'}});render()
+    assert(d.distributionIsStale(mapProps().distribution.context,mapProps().distribution.state))
+    props=render();props.onOpenSaved();render()
+    assert.equal(mapProps().distribution.state.connections.find(s=>s.id===segment.id).permission,'blocked')
+    assert.equal(d.distributionIsStale(mapProps().distribution.context,mapProps().distribution.state),false)
+    assert.equal(JSON.stringify(mapProps().plan),before)
+    assert.equal(mapProps().distribution.state.result.summary.unreachableCount,2)
+  }finally{global.localStorage=previousStorage}
+})
+
+test('distribution Leaflet overlays deduplicate physical spans, show failures and update selection without rebuilding',()=>{
+  const previousDocument=global.document
+  global.document={createElement:()=>({})}
+  try{
+    class Layer{constructor(options={}){this.options=options;this.events={}}on(event,fn){this.events[event]=fn;return this}bindTooltip(content,options){this.tooltip=content;this.tooltipOptions=options;return this}setStyle(style){this.style={...this.style,...style};return this}bringToFront(){return this}addTo(map){this.map=map;map.layers.add(this);return this}remove(){this.map?.layers.delete(this);return this}}
+    class Group extends Layer{constructor(){super();this.children=[]}addLayer(child){this.children.push(child);return this}clearLayers(){this.children=[];return this}}
+    let controls,builds=0,removed=0
+    const leaflet={featureGroup:()=>new Group(),polyline:(_,options)=>{builds++;return new Layer(options)},marker:(_,options)=>new Layer(options),circleMarker:(_,options)=>new Layer(options),divIcon:options=>options,control:{layers:(_,overlays)=>{controls=overlays;return {addTo(){return this},remove(){removed++}}}}}
+    const map={layers:new Set(),panes:{},getPane(id){return this.panes[id]},createPane(id){return this.panes[id]={style:{}}}}
+    const d=require('../lib/distribution.ts'),harness=hooks(),selected=[]
+    const {DistributionMapLayers}=load('../components/distribution-map-layers.tsx',{react:harness.react,'react-leaflet':{useMap:()=>map},leaflet,'@/lib/distribution':d})
+    const p=(id,x,y=0)=>({id,name:id,coordinates:[x,y]}),a=p('a',0),b=p('b',.001),c=p('c',.002),isolated=p('z',1)
+    const context={poles:[a,b,c,isolated],fdts:[],fats:[{id:'f1',name:'f1',poleId:'c'},{id:'f2',name:'f2',poleId:'c'},{id:'bad',name:'bad',poleId:'z'}]}
+    const state={...d.emptyDistribution(),sources:[{id:'s',name:'s',kind:'temporary',poleId:'a'}],assignments:{f1:'s',f2:'s',bad:'s'},connections:[d.createConnection('ab',a,b,'allowed'),d.createConnection('bc',b,c,'allowed'),d.createConnection('az',a,isolated,'unverified')]}
+    state.result=d.generateDistribution(context,state)
+    const onSelectSegment=id=>selected.push(id),onSelectRoute=()=>{},onPickPole=()=>{}
+    let props={context,state,editor:null,selectedRouteKey:null,selectedSegmentId:null,onSelectSegment,onSelectRoute,onPickPole}
+    harness.render(()=>DistributionMapLayers(props))
+    const [connections,routes,markers]=Object.values(controls)
+    assert.equal(connections.children.length,3)
+    assert.equal(routes.children.length,4) // two unique spans, each with one halo; not four per-FAT spans.
+    assert.equal(markers.children.length,2) // source and unreachable FAT.
+    assert.equal(connections.children[2].options.dashArray,'3 7')
+    assert(markers.children.some(m=>m.options.title==='bad: masalah distribusi'))
+    const before=builds
+    props={...props,selectedRouteKey:state.result.routes.find(r=>r.fatId==='f1').key}
+    harness.render(()=>DistributionMapLayers(props))
+    assert.equal(builds,before)
+    assert.equal(routes.children[0].style.opacity,.95)
+    assert.equal(routes.children[1].style.weight,8)
+    routes.children[1].events.click();assert.deepEqual(selected,['ab'])
+    harness.cleanup();assert.equal(map.layers.size,0);assert.equal(removed,1)
+  }finally{global.document=previousDocument}
+})
+
+test('settings draft validates before apply, reset and cancel do not mutate active configuration',()=>{
+ const workspace=require('../lib/workspace.ts'),harness=hooks(),applied=[],closed=[]
+ const {WorkspaceSettings}=load('../components/workspace-settings.tsx',{react:harness.react,'@/lib/workspace':workspace,'./ui/button':{Button:'button'},'./ui/input':{Input:'input'}})
+ const configuration=workspace.defaultWorkspaceConfiguration(),before=JSON.stringify(configuration)
+ function find(node,predicate){if(!node||typeof node!=='object')return null;if(Array.isArray(node)){for(const item of node){const found=find(item,predicate);if(found)return found}return null}return predicate(node)?node:find(node.props?.children,predicate)}
+ function text(node){if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+ const render=()=>harness.render(()=>WorkspaceSettings({configuration,onApply:next=>applied.push(next),onClose:()=>closed.push(true)}))
+ const button=(tree,label)=>find(tree,n=>n.type==='button'&&text(n)===label)
+ let tree=render()
+ find(tree,n=>n.props?.['aria-label']==='Maksimum panjang drop').props.onChange({target:{value:'0'}});tree=render()
+ button(tree,'Terapkan perubahan').props.onClick();tree=render()
+ assert.equal(applied.length,0);assert(find(tree,n=>n.props?.role==='alert'))
+ find(tree,n=>n.props?.['aria-label']==='Maksimum panjang drop').props.onChange({target:{value:'25'}});tree=render()
+ button(tree,'Batal').props.onClick()
+ assert.equal(closed.length,1);assert.equal(applied.length,0);assert.equal(JSON.stringify(configuration),before)
+ button(tree,'Reset draft ke default aplikasi').props.onClick();tree=render()
+ assert.equal(find(tree,n=>n.props?.['aria-label']==='Maksimum panjang drop').props.value,50)
+ assert.equal(applied.length,0)
+ button(tree,'Terapkan perubahan').props.onClick()
+ assert.deepEqual(applied[0],workspace.defaultWorkspaceConfiguration())
+ find(tree,n=>n.props?.role==='dialog').props.onKeyDown({key:'Escape',stopPropagation(){}})
+ assert.equal(closed.length,2)
+ const previousDocument=global.document;let focusCalls=0,prevented=0
+ const first={focus(){focusCalls++}},last={focus(){focusCalls++}}
+ try{
+  global.document={activeElement:last}
+  const dialog=find(tree,n=>n.props?.role==='dialog')
+  dialog.props.onKeyDown({key:'Tab',shiftKey:false,currentTarget:{querySelectorAll:()=>[first,last]},preventDefault(){prevented++}})
+  global.document.activeElement=first
+  dialog.props.onKeyDown({key:'Tab',shiftKey:true,currentTarget:{querySelectorAll:()=>[first,last]},preventDefault(){prevented++}})
+  assert.equal(focusCalls,2);assert.equal(prevented,2)
+ }finally{global.document=previousDocument}
+})
+
+test('browser snapshot resumes after refresh with configuration and engineer locks intact; UI stays closed',()=>{
+ const previousStorage=global.localStorage
+ try{
+  const planning=require('../lib/ftth-planning.ts'),a=require('../lib/allocation-recommendations.ts'),d=require('../lib/distribution.ts'),project=require('../lib/ftth-project.ts')
+  const f=(id,category)=>({id,name:id,category,file:'resume.kml',kmlFile:'doc.kml',kind:'Point',geometry:{type:'Point',coordinates:[107,-6]},coords:[-6,107],props:{}})
+  const features=[f('pole','Tiang'),f('house','Rumah')],base=planning.planFtth(features)
+  const detached=a.disconnectHome(base,a.emptyAllocations(),base.groups[0].id,'house')
+  const installed=a.installFatOnPole(a.allocationContext(detached.plan,features),detached.state,'pole')
+  const connected=a.connectHomeToFat(a.allocationContext(installed.plan,features),installed.state,installed.group.id,'house')
+  const snapshot={format:'smart-ftth-project',version:1,savedAt:'2026-10-25T00:00:00Z',features,plan:connected.plan,allocations:connected.state,configuration:{fatPorts:8,maxDropLengthMeters:20,maxFatsPerPole:2},distribution:d.emptyDistribution()}
+  const saved=project.serializeFtthProject(snapshot),writes=[]
+  global.localStorage={getItem:key=>key===project.PROJECT_STORAGE_KEY?saved:null,setItem:(...args)=>writes.push(args)}
+  const harness=hooks(),{default:Viewer}=load('../components/ftth-viewer.tsx',{
+   ...workspaceOverrides,react:harness.react,'next/dynamic':()=> 'MapView','@/lib/import-survey':{importSurveyFile(){},ImportSurveyError:class extends Error{}},'@/lib/survey':survey,'@/lib/ftth-planning':planning,'@/lib/layer-settings':preferences,'@/lib/distribution':d,'@/lib/ftth-project':project,'@/lib/allocation-recommendations':a,'@/lib/application-log':require('../lib/application-log.ts'),
+   '@/hooks/use-application-log':{useApplicationLog:()=>({entries:[],addLogs(){}})},'@/hooks/use-layer-settings':{useLayerSettings:()=>({settings:preferences.defaultLayerSettings(),setSettings(){},ready:true,storageError:false})},
+   '@/components/distribution-panel':{DistributionPanel:'DistributionPanel'},'@/components/planning-panel':{PlanningPanel:'PlanningPanel'},'@/components/allocation-panel':{AllocationPanel:'AllocationPanel'},'@/components/application-log':{ApplicationLog:'ApplicationLog'},'@/components/ui/button':{Button:'button'},'@/components/ui/input':{Input:'input'},'@/components/ui/badge':{Badge:'span'},'@/components/ui/separator':{Separator:'hr'},
+  })
+  function find(node,predicate){if(!node||typeof node!=='object')return null;if(Array.isArray(node)){for(const item of node){const found=find(item,predicate);if(found)return found}return null}return predicate(node)?node:find(node.props?.children,predicate)}
+  harness.render(Viewer);const tree=harness.render(Viewer),map=find(tree,n=>n.type==='MapView').props
+  assert.equal(find(tree,n=>n.type==='WorkspaceSettings'),null)
+  assert.equal(find(tree,n=>n.type==='aside').props.hidden,true)
+  assert.equal(find(tree,n=>n.type==='InspectionPanel').props.serviceStale,true)
+  assert.equal(map.plan.groups.find(g=>g.id===installed.group.id).homes[0].id,'house')
+  assert.equal(map.plan.groups.find(g=>g.id===installed.group.id).locked,true)
+  assert.equal(map.plan.maxDropLengthMeters,50) // saved old result is retained, not falsely relabelled as current 20 m.
+  assert.deepEqual(writes,[]) // resume is read-only, never implicit autosave.
+ }finally{global.localStorage=previousStorage}
+})
+
+test('explorer search and status filters select the correct object without altering survey or service membership',()=>{
+ const harness=hooks(),selected=[],selectedGroups=[]
+ const {ObjectExplorer}=load('../components/object-explorer.tsx',{react:harness.react,'./ui/button':{Button:'button'},'./ui/input':{Input:'input'}})
+ const feature=(id,category)=>({id,name:id,category,props:{}})
+ const features=[feature('Rumah 1','Rumah'),feature('Rumah 2','Rumah'),feature('Tiang 1','Tiang')]
+ const plan={fatPorts:8,groups:[{id:'G001',color:'#047857',homes:[{id:'Rumah 1'}],candidate:{id:'FAT-G001',pole:{name:'Tiang 1'}}}],unservedHomes:[{home:{id:'Rumah 2'}}]}
+ const before=JSON.stringify({features,plan})
+ function find(node,predicate){if(!node||typeof node!=='object')return null;if(Array.isArray(node)){for(const item of node){const found=find(item,predicate);if(found)return found}return null}return predicate(node)?node:find(node.props?.children,predicate)}
+ function text(node){if(node==null||typeof node==='boolean')return '';if(typeof node!=='object')return String(node);if(Array.isArray(node))return node.map(text).join('');return text(node.props?.children)}
+ const render=()=>harness.render(()=>ObjectExplorer({activity:'fat',features,plan,selectedId:null,groupId:null,onSelect:f=>selected.push(f.id),onSelectGroup:id=>selectedGroups.push(id)}))
+ let tree=render()
+ find(tree,n=>n.props?.['aria-label']==='Cari objek').props.onChange({target:{value:'FAT-G001'}});tree=render()
+ find(tree,n=>n.type==='button'&&text(n).includes('FAT-G001')).props.onClick()
+ assert.deepEqual(selectedGroups,['G001'])
+ find(tree,n=>n.props?.['aria-label']==='Cari objek').props.onChange({target:{value:''}});tree=render()
+ find(tree,n=>n.props?.['aria-label']==='Jenis objek').props.onChange({target:{value:'Rumah'}});tree=render()
+ find(tree,n=>n.props?.['aria-label']==='Status objek').props.onChange({target:{value:'unserved'}});tree=render()
+ assert.equal(find(tree,n=>n.type==='button'&&text(n).includes('Rumah 1')),null)
+ find(tree,n=>n.type==='button'&&text(n).includes('Rumah 2')).props.onClick()
+ assert.deepEqual(selected,['Rumah 2'])
+ assert.equal(JSON.stringify({features,plan}),before)
 })

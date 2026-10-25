@@ -11,8 +11,8 @@ const levels = {
   error: { label: "Error", icon: CircleAlert, color: "text-red-600", badge: "bg-red-50 text-red-700" },
 } as const
 
-export function ApplicationLog({ entries }: { entries: LogEntry[] }) {
-  const [open, setOpen] = useState(false)
+export function ApplicationLog({ entries, defaultOpen=false }: { entries: LogEntry[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
   const counts = useMemo(() => countLogLevels(entries), [entries])
   const last = entries[entries.length - 1]
   return <section aria-label="Log aplikasi" className="z-[800] shrink-0 border-t bg-white text-slate-800">
@@ -25,7 +25,7 @@ export function ApplicationLog({ entries }: { entries: LogEntry[] }) {
       })}{open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}</span>
     </button>
     <span className="sr-only" role="status" aria-live="polite">{last ? `Log terbaru: ${levels[last.level].label}. ${last.title}` : "Belum ada log."}</span>
-    {open && <div id="application-log-body" className="h-[min(32vh,280px)] overflow-y-auto border-t bg-slate-50 px-3 py-2" onKeyDown={event => { if (event.key === "Escape") { setOpen(false); document.querySelector<HTMLButtonElement>('[aria-controls="application-log-body"]')?.focus() } }}>
+    {open && <div id="application-log-body" className="h-[min(32vh,280px)] overflow-y-auto border-t bg-slate-50 px-3 py-2" onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); setOpen(false); document.querySelector<HTMLButtonElement>('[aria-controls="application-log-body"]')?.focus() } }}>
       <ol className="space-y-1.5">{[...entries].reverse().map(entry => {
         const item = levels[entry.level]
         const Icon = item.icon

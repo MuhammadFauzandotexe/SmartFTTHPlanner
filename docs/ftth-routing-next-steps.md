@@ -44,3 +44,11 @@ Fitur rekomendasi alokasi rumah belum terlayani menjadi prioritas sesi ini. Road
 - [ ] Mengevaluasi konsekuensi perubahan FAT terhadap distribusi/upstream.
 - [ ] Menampilkan metrik cakupan, drop maksimum, total drop, dan jumlah FAT.
 - [ ] Menambahkan pengujian regresi untuk kasus rumah jauh dan persaingan port (uji batas dasar sudah tersedia; persaingan port lintas FAT belum).
+
+## Prioritas terbaru: Jalur Distribusi
+
+Alur distribusi sumber–FAT melalui koneksi antar-tiang yang diizinkan diimplementasikan terpisah pada sesi ini. Lihat [catatan Jalur Distribusi](ftth-distribution.md). Checklist routing drop/solver/optimasi global sebelumnya tetap ditunda dan tidak diimplementasikan oleh fitur distribusi ini.
+
+## Reorganisasi workspace UI/UX
+
+Panel teknis dipisahkan dari toolbar proses, explorer/detail, dan dock pemeriksaan. Algoritma/roadmap tetap tidak berubah. Pemetaan fitur dan batas verifikasi tercatat di [audit implementasi workspace](ftth-workspace-ux.md).

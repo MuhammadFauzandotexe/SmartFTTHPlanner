@@ -5,6 +5,8 @@ import { MapContainer, TileLayer, useMap } from "react-leaflet"
 import L from "leaflet"
 import { toGeoJSON, type Category, type FeatureItem } from "@/lib/survey"
 import { baseMaps, categories, layerPaneName, layerZIndex, type LayerSettings, type LayerStyle } from "@/lib/layer-settings"
+import { DistributionMapLayers } from "@/components/distribution-map-layers"
+import type { ComponentProps } from "react"
 import { PolePlacementLayer } from "@/components/pole-placement-layer"
 import { FatSelectionLayer } from "@/components/fat-selection-layer"
 import { PlanningMapLayers } from "@/components/planning-map-layers"
@@ -15,6 +17,8 @@ import "leaflet/dist/leaflet.css"
 
 type MapViewProps = {
   features: FeatureItem[]
+  selectedFeature?: FeatureItem | null
+  distribution?: ComponentProps<typeof DistributionMapLayers>
   onSelect: (feature: FeatureItem) => void
   onReady?: (map: L.Map) => void
   showLabels?: boolean
@@ -142,16 +146,23 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
   return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, placementContext, onPickPole, selectingHome, onPickFat, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
+function SelectedSurveyLayer({feature}:{feature:FeatureItem}){
+ const map=useMap()
+ useEffect(()=>{const pane=map.getPane("workspace-selection")||map.createPane("workspace-selection");pane.style.zIndex="540";const layer=L.geoJSON(toGeoJSON(feature),{pane:"workspace-selection",interactive:false,style:{color:"#eab308",weight:5,fillOpacity:0},pointToLayer:(_,latlng)=>L.circleMarker(latlng,{pane:"workspace-selection",color:"#eab308",radius:18,weight:4,fillOpacity:0,interactive:false})}).addTo(map);return()=>{layer.remove()}},[map,feature])
+ return null
+}
+export default function MapView({ features, selectedFeature, onSelect, onReady, showLabels, settings, plan, distribution, placementContext, onPickPole, selectingHome, onPickFat, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
   const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
   const base = baseMaps[settings.baseMap]
   return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
     <TileLayer key={settings.baseMap} attribution={base.attribution} url={base.url} maxNativeZoom={19} maxZoom={22} />
     <MapInitializer onReady={onReady} />
-    {!selectingHome && categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} disabled={!!placementContext} />)}
-    {!selectingHome && !placementContext && provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
+    {!selectingHome && categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} disabled={!!placementContext || !!distribution?.editor} />)}
+    {!distribution?.editor && !selectingHome && !placementContext && provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
     {!placementContext && selectingHome && plan && onPickFat && <FatSelectionLayer plan={plan} home={selectingHome} onPick={onPickFat} />}
-    {!placementContext && !selectingHome && plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
+    {!distribution?.editor && !placementContext && !selectingHome && plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
     {placementContext && onPickPole && <PolePlacementLayer context={placementContext} onPick={onPickPole} />}
+    {!placementContext && !selectingHome && distribution && <DistributionMapLayers {...distribution} />}
+    {selectedFeature&&!selectingHome&&!placementContext&&!distribution?.editor&&<SelectedSurveyLayer feature={selectedFeature}/>}
   </MapContainer>
 }
