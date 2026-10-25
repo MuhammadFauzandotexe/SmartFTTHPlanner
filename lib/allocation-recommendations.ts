@@ -35,14 +35,14 @@ export type CandidateCheck = {
   used: number; remaining: number
 }
 export type LockedDesign = { group: HomeGroup; proposalId: string; verification: ManualVerification; geometryRevision: string }
-export type AllocationState = { proposals: Proposal[]; locks: LockedDesign[] }
+export type AllocationState = { proposals: Proposal[]; locks: LockedDesign[]; detachedHomeIds?: string[]; manualRevision?: number }
 export const emptyAllocations = (): AllocationState => ({ proposals: [], locks: [] })
 const cmp = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 export const pathKey = (homeId: string, poleId: string) => JSON.stringify([homeId, poleId])
 const geometry = (p: PlanningPoint) => [p.id, p.coordinates]
 // Exact canonical strings avoid hash collisions and exclude names and display metadata.
 export function inputRevision(ctx: AllocationContext): string {
-  return JSON.stringify({ maxDrop: ctx.plan.maxDropLengthMeters, ports: ctx.plan.fatPorts,
+  return JSON.stringify({ manualRevision: ctx.plan.manualRevision || 0, maxDrop: ctx.plan.maxDropLengthMeters, ports: ctx.plan.fatPorts,
     homes: [...ctx.plan.groups.flatMap(g => g.homes), ...ctx.plan.unservedHomes.map(h => h.home)].sort((a,b) => cmp(a.id,b.id)).map(geometry),
     poles: [...ctx.poles].sort((a,b) => cmp(a.id,b.id)).map(geometry),
     fats: [...(ctx.surveyFats || [])].sort((a,b) => cmp(a.id,b.id)).map(geometry),
@@ -235,17 +235,36 @@ export function acceptProposal(ctx: AllocationContext, state: AllocationState, i
   const oldLock = state.locks.find(l=>l.group.candidate?.id===fatId)
   const verification = p.verification || {paths:Object.fromEntries(check.drops.map(d=>[d.homeId,{allowed:"yes" as const,lengthMeters:d.meters}])),installation:false,upstream:false,capacityConfirmed:false,note:"Pemeriksaan otomatis"}
   const lock: LockedDesign = {group, proposalId:id, verification:{...verification,paths:{...oldLock?.verification.paths,...verification.paths}}, geometryRevision: JSON.stringify([geometry(p.target.pole),homes.map(geometry)])}
-  return {plan,state:{proposals:state.proposals.map(x=>x.id===id?{...x,decision:"accepted",history:[...x.history,`Accepted: ${verification.note}`]}:x), locks:[...state.locks.filter(l=>l.group.candidate?.id!==fatId),lock]}}
+  return {plan,state:{manualRevision:state.manualRevision,detachedHomeIds:state.detachedHomeIds?.filter(id=>!p.homes.some(h=>h.id===id)),proposals:state.proposals.map(x=>x.id===id?{...x,decision:"accepted",history:[...x.history,`Accepted: ${verification.note}`]}:x), locks:[...state.locks.filter(l=>l.group.candidate?.id!==fatId),lock]}}
 }
 /** Locks take precedence; rebuild only the automatic part, never silently discard engineer designs. */
-export function preserveLockedDesigns(base: FtthPlan, locks: LockedDesign[]): FtthPlan {
-  const ids = new Set(locks.flatMap(l=>l.group.homes.map(h=>h.id)))
+export function preserveLockedDesigns(base: FtthPlan, locks: LockedDesign[], detachedHomeIds: readonly string[] = [], manualRevision = base.manualRevision || 0): FtthPlan {
+  const ids = new Set([...locks.flatMap(l=>l.group.homes.map(h=>h.id)),...detachedHomeIds])
   const lockIds = new Set(locks.map(l=>l.group.id))
   const groups = base.groups.map(g=>{
     const homes=g.homes.filter(h=>!ids.has(h.id)), connections=g.candidate?.connections.filter(c=>!ids.has(c.homeId)) || []
     return {...g,id:lockIds.has(g.id)?`AUTO:${g.id}`:g.id,homes,candidate:g.candidate?{...g.candidate,id:locks.some(l=>l.group.candidate?.id===g.candidate?.id)?`AUTO:${g.candidate.id}`:g.candidate.id,connections,totalDistanceMeters:connections.reduce((s,c)=>s+c.distanceMeters,0)}:null}
   }).filter(g=>g.homes.length)
-  return {...base,groups:[...groups,...locks.map(l=>l.group)],unservedHomes:base.unservedHomes.filter(h=>!ids.has(h.home.id))}
+  const lockedIds = new Set(locks.flatMap(l=>l.group.homes.map(h=>h.id)))
+  const unservedHomes = base.unservedHomes.filter(h=>!lockedIds.has(h.home.id)).map(item=>detachedHomeIds.includes(item.home.id)?{...item,reason:"Diputuskan manual dari cluster oleh engineer."}:item)
+  for (const home of base.groups.flatMap(g=>g.homes)) if (detachedHomeIds.includes(home.id) && !lockedIds.has(home.id) && !unservedHomes.some(item=>item.home.id===home.id)) unservedHomes.push({home,reason:"Diputuskan manual dari cluster oleh engineer."})
+  return {...base,manualRevision,groups:[...groups,...locks.map(l=>l.group)],unservedHomes}
+}
+/** Explicitly remove only a service relationship, retaining the surveyed home and FAT device. */
+export function disconnectHome(plan: FtthPlan, state: AllocationState, groupId: string, homeId: string): {plan: FtthPlan; state: AllocationState} {
+  const original = plan.groups.find(group=>group.id===groupId)
+  const home = original?.homes.find(home=>home.id===homeId)
+  if (!original || !home) return {plan,state}
+  const manualRevision = Math.max(plan.manualRevision || 0, state.manualRevision || 0) + 1
+  const connection = original.candidate?.connections.find(c=>c.homeId===homeId)
+  const connections = original.candidate?.connections.filter(c=>c.homeId!==homeId) || []
+  const group: HomeGroup = {...original,locked:true,homes:original.homes.filter(h=>h.id!==homeId),candidate:original.candidate?{...original.candidate,connections,totalDistanceMeters:connections.reduce((sum,c)=>sum+c.distanceMeters,0)}:null}
+  const previous = state.locks.find(lock=>lock.group.id===groupId)
+  const paths = {...previous?.verification.paths}
+  delete paths[homeId]
+  const note = `Hubungan rumah ${home.name} diputuskan manual dari ${groupId}.`
+  const lock: LockedDesign = {group,proposalId:previous?.proposalId||`DISCONNECT:${groupId}`,geometryRevision:JSON.stringify([group.candidate?.pole.coordinates,group.homes.map(h=>[h.id,h.coordinates])]),verification:{paths,installation:previous?.verification.installation||false,upstream:previous?.verification.upstream||false,capacityConfirmed:previous?.verification.capacityConfirmed||false,maxFats:previous?.verification.maxFats,note:[previous?.verification.note,note].filter(Boolean).join("\n")}}
+  return {plan:{...plan,manualRevision,groups:plan.groups.map(g=>g.id===groupId?group:g),unservedHomes:[...plan.unservedHomes.filter(item=>item.home.id!==homeId),{home,reason:"Diputuskan manual dari cluster oleh engineer.",fatId:original.candidate?.id,pole:original.candidate?.pole,distanceMeters:connection?.distanceMeters,distanceMethod:connection?.method || "straight-line"}]},state:{...state,manualRevision,detachedHomeIds:[...new Set([...(state.detachedHomeIds||[]),homeId])],locks:[...state.locks.filter(l=>l.group.id!==groupId),lock],proposals:state.proposals.map(p=>p.decision==="accepted"&&p.homes.some(h=>h.id===homeId)?{...p,history:[...p.history,note]}:p)}}
 }
 export function lockedDesignIssues(ctx: AllocationContext, locks: LockedDesign[]): string[] {
   const messages:string[]=[]

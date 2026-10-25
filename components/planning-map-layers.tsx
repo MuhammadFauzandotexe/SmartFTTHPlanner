@@ -9,6 +9,7 @@ type Props = {
   plan: FtthPlan
   highlightedGroupId: string | null
   onSelectGroup: (id: string) => void
+  onDisconnectHome?: (groupId: string, homeId: string) => void
   onSelectHome: (id: string) => void
   onHighlightGroup: (id: string) => void
   onHoverGroup: (id: string | null) => void
@@ -17,7 +18,7 @@ type Props = {
 type Overlays = { homes: L.FeatureGroup; fats: L.FeatureGroup; links: L.FeatureGroup }
 type Highlight = {
   rings: { layer: L.CircleMarker; group: HomeGroup }[]
-  links: { layer: L.Polyline; group: HomeGroup; dropLabel: string }[]
+  links: { layer: L.Polyline; group: HomeGroup; home: PlanningPoint; dropLabel: string }[]
   identities: { layer: L.Marker; group: HomeGroup; element: HTMLElement }[]
   fats: { layer: L.Marker; groups: HomeGroup[]; element: HTMLElement }[]
 }
@@ -26,7 +27,7 @@ const latLng = (point: PlanningPoint): L.LatLngTuple => [point.coordinates[1], p
 const text = (value: string) => { const span = document.createElement("span"); span.textContent = value; return span }
 
 /** Planning overlays are separate from survey layers and never modify the plan. */
-export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onSelectHome, onHighlightGroup, onHoverGroup, homeMarkerSize }: Props) {
+export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup, homeMarkerSize }: Props) {
   const map = useMap()
   const overlays = useRef<Overlays | null>(null)
   const highlight = useRef<Highlight>(emptyHighlight())
@@ -71,7 +72,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
           layers.links.addLayer(link)
           const drop = group.candidate.connections.find(connection => connection.homeId === home.id)
           const length = drop && Number.isFinite(drop.distanceMeters) ? `${drop.distanceMeters.toLocaleString("id-ID", { maximumFractionDigits: 1 })} m` : "belum tersedia"
-          highlight.current.links.push({ layer: link, group, dropLabel: length })
+          highlight.current.links.push({ layer: link, group, home, dropLabel: length })
         }
       }
       // A permanent group identity works for single homes and collinear groups too.
@@ -115,7 +116,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
     for (const item of plan.unservedHomes) {
       const marker = L.circleMarker(latLng(item.home), {
         pane: "planning-homes", radius: 14, color: "#dc2626", fillColor: "#dc2626", fillOpacity: 0.15, weight: 3, dashArray: "3 3",
-      }).bindTooltip(text(`Belum terlayani · ${item.home.name} · ${item.reason}${item.fatId ? ` ${item.fatId}: estimasi jarak lurus ${item.distanceMeters?.toFixed(1)} m; batas ${plan.maxDropLengthMeters} m.` : ""}`)).on("click", () => onSelectHome(item.home.id))
+      }).bindTooltip(text(`Belum terlayani · ${item.home.name} · ${item.reason}${item.fatId ? ` ${item.fatId}: ${item.distanceMethod === "route" ? "panjang jalur terverifikasi" : "estimasi jarak lurus"} ${item.distanceMeters?.toFixed(1)} m; batas ${plan.maxDropLengthMeters} m.` : ""}`)).on("click", () => onSelectHome(item.home.id))
       layers.homes.addLayer(marker)
     }
     // Shared poles use one map marker with a selector for every associated FAT.
@@ -139,7 +140,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
         button.addEventListener("click", () => { onSelectGroup(group.id); marker.closePopup() })
         popup.appendChild(button)
       }
-      marker.bindPopup(popup)
+      marker.bindPopup(popup, { autoPan: false })
       marker.on("click", () => { if (groups.length === 1) onSelectGroup(groups[0].id) })
       layers.fats.addLayer(marker)
       highlight.current.fats.push({ layer: marker, groups, element: symbol })
@@ -149,7 +150,7 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
       for (const layer of Object.values(layers)) layer.clearLayers()
       highlight.current = emptyHighlight()
     }
-  }, [plan, map, onSelectGroup, onSelectHome, onHighlightGroup, onHoverGroup])
+  }, [plan, map, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup])
 
   useEffect(() => {
     const focused = highlightedGroupId !== null
@@ -160,12 +161,35 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
       layer.setStyle({ weight: active ? 4 : dimmed ? 1 : 2, opacity: dimmed ? 0.2 : 1, fillOpacity: active ? 0.3 : dimmed ? 0.025 : 0.15 })
       if (active) layer.bringToFront()
     }
-    for (const { layer, group, dropLabel } of highlight.current.links) {
+    for (const { layer, group, home, dropLabel } of highlight.current.links) {
       const active = group.id === highlightedGroupId
       layer.setStyle({ weight: active ? 4 : 1.5, opacity: active ? 1 : focused ? 0.12 : 0.55 })
       layer.unbindTooltip()
       if (active) {
-        layer.bindTooltip(text(dropLabel), { permanent: true, direction: "center", opacity: 0.95 })
+        const label = document.createElement("span")
+        label.className = "planning-drop-label"
+        label.appendChild(text(dropLabel))
+        if (onDisconnectHome) {
+          const menu = document.createElement("details")
+          menu.className = "planning-drop-menu"
+          const toggle = document.createElement("summary")
+          toggle.textContent = "⋮"
+          toggle.setAttribute("aria-label", `Opsi hubungan ${home.name}`)
+          toggle.title = `Opsi hubungan ${home.name} ke ${group.candidate?.id}`
+          const action = document.createElement("button")
+          action.type = "button"
+          action.textContent = "Putuskan dari cluster"
+          action.title = `Putuskan ${home.name} dari ${group.id}`
+          action.addEventListener("click", event => { event.stopPropagation(); menu.open = false; onDisconnectHome(group.id, home.id) })
+          menu.appendChild(toggle)
+          menu.appendChild(action)
+          menu.addEventListener("click", event => event.stopPropagation())
+          menu.addEventListener("mousedown", event => event.stopPropagation())
+          menu.addEventListener("dblclick", event => event.stopPropagation())
+          menu.addEventListener("keydown", event => { if (event.key === "Escape") { menu.open = false; toggle.focus() } })
+          label.appendChild(menu)
+        }
+        layer.bindTooltip(label, { permanent: true, direction: "center", opacity: 0.95, interactive: true, className: "planning-drop-tooltip" })
         layer.bringToFront()
       }
     }
@@ -184,6 +208,6 @@ export function PlanningMapLayers({ plan, highlightedGroupId, onSelectGroup, onS
       layer.setZIndexOffset(active ? 1000 : 0)
       element.style.boxShadow = active ? "0 0 0 3px white, 0 2px 10px rgb(15 23 42 / 50%)" : ""
     }
-  }, [highlightedGroupId, homeMarkerSize, plan, onSelectGroup, onSelectHome, onHighlightGroup, onHoverGroup])
+  }, [highlightedGroupId, homeMarkerSize, plan, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup])
   return null
 }

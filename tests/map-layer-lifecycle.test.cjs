@@ -173,7 +173,7 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
       on(name, fn) { this.events[name] = fn; return this }
       bindTooltip(text, options) { this.tooltip = text; this.tooltipOptions = options; return this }
       unbindTooltip() { this.tooltip = null; return this }
-      bindPopup(popup) { this.popup = popup; return this }
+      bindPopup(popup, options) { this.popup = popup; this.popupOptions = options; return this }
       closePopup() { return this }
       setStyle(style) { this.style = { ...this.style, ...style }; return this }
       setRadius(radius) { this.radius = radius; return this }
@@ -209,15 +209,17 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     const original = JSON.stringify(plan)
     const selected = []
     const selectedHomes = []
+    const disconnectedHomes = []
     const highlighted = []
     const hovered = []
-    let props = { plan, highlightedGroupId: null, homeMarkerSize: 20, onSelectGroup: id => selected.push(id), onSelectHome: id => selectedHomes.push(id), onHighlightGroup: id => highlighted.push(id), onHoverGroup: id => hovered.push(id) }
+    let props = { plan, highlightedGroupId: null, homeMarkerSize: 20, onSelectGroup: id => selected.push(id), onSelectHome: id => selectedHomes.push(id), onDisconnectHome: (groupId, homeId) => disconnectedHomes.push([groupId, homeId]), onHighlightGroup: id => highlighted.push(id), onHoverGroup: id => hovered.push(id) }
     harness.render(() => PlanningMapLayers(props))
     assert.equal(controls, 1)
     assert.equal(map.layers.size, 3)
     const [homes, fats, links] = Object.values(registered)
     assert.equal(homes.children.length, 3) // two homes and one group identity
     assert.equal(fats.children.length, 1)
+    assert.equal(fats.children[0].popupOptions.autoPan, false)
     assert.equal(links.children.length, 2)
     homes.children[0].events.click()
     assert.deepEqual(selected, [])
@@ -242,7 +244,13 @@ test('planning overlays retain visibility on rerun, replace old geometry and nev
     assert.equal(links.children[0].style.weight, 4)
     assert.equal(links.children[0].style.opacity, 1)
     assert.equal(links.children[0].tooltipOptions.permanent, true)
-    assert.equal(links.children[0].tooltip.textContent, '0 m')
+    assert.equal(links.children[0].tooltip.children[0].textContent, '0 m')
+    assert.equal(links.children[0].tooltipOptions.interactive, true)
+    const disconnectMenu = links.children[0].tooltip.children[1]
+    assert.equal(disconnectMenu.children[0].textContent, '⋮')
+    assert.equal(disconnectMenu.children[1].textContent, 'Putuskan dari cluster')
+    disconnectMenu.children[1].events.click({ stopPropagation() {} })
+    assert.deepEqual(disconnectedHomes, [['G001', 'h1']])
     assert.equal(identity.zIndexOffset, 1000)
     assert.equal(controls, 1)
     homes.remove() // Leaflet's native layer control toggles membership only.
@@ -404,10 +412,21 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   section(tree, 'Perencanaan FTTH').props.onOpenChange(false)
   tree = harness.render(Viewer)
   assert.equal(section(tree, 'Perencanaan FTTH').props.open, false)
-  panel(tree).props.onSelectGroup('G001')
+  const cameraChanges = []
+  find(tree, node => node.type === 'MapView').props.onReady({
+    fitBounds: (...args) => cameraChanges.push(args),
+    invalidateSize() {},
+  })
+  tree = harness.render(Viewer)
+  cameraChanges.length = 0 // Import fitting remains separate from FAT selection.
+  find(tree, node => node.type === 'MapView').props.onSelectGroup('G001')
   tree = harness.render(Viewer)
   assert.equal(section(tree, 'Perencanaan FTTH').props.open, true)
   assert.equal(panel(tree).props.selectedGroupId, 'G001')
+  assert.deepEqual(cameraChanges, [])
+  find(tree, node => node.type === 'MapView').props.onSelectGroup('G001')
+  tree = harness.render(Viewer)
+  assert.deepEqual(cameraChanges, [])
   section(tree, 'Layer & Kategori').props.onOpenChange(true)
   section(tree, 'Data Impor').props.onOpenChange(true)
   tree = harness.render(Viewer)

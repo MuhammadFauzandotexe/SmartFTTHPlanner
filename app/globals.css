@@ -261,3 +261,13 @@
 
 
 .control-section[open] > summary > .control-section-chevron { transform: rotate(180deg); }
+
+.planning-drop-tooltip { padding: 2px 5px; }
+.planning-drop-label { display: inline-flex; align-items: center; gap: 4px; }
+.planning-drop-menu { position: relative; }
+.planning-drop-menu > summary { list-style: none; cursor: pointer; padding: 0 4px; font-size: 17px; line-height: 20px; border-radius: 3px; }
+.planning-drop-menu > summary::-webkit-details-marker { display: none; }
+.planning-drop-menu > summary:hover, .planning-drop-menu > summary:focus-visible { background: #ecfdf5; outline: 2px solid #059669; }
+.planning-drop-menu > button { position: absolute; top: 100%; right: 0; z-index: 1; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; background: white; color: #b91c1c; box-shadow: 0 3px 10px rgb(15 23 42 / 15%); white-space: nowrap; cursor: pointer; font: inherit; }
+.planning-drop-menu > button:hover, .planning-drop-menu > button:focus-visible { background: #fef2f2; }
+.planning-drop-tooltip:focus-within { z-index: 1000; }

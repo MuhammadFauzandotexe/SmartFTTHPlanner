@@ -21,6 +21,7 @@ type MapViewProps = {
   onSelectProposal?: (proposal: Proposal) => void
   plan?: FtthPlan | null
   highlightedGroupId?: string | null
+  onDisconnectHome?: (groupId: string, homeId: string) => void
   onSelectHome?: (id: string) => void
   onHighlightGroup?: (id: string) => void
   onHoverGroup?: (id: string | null) => void
@@ -132,7 +133,7 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
   return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
+export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
   const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
   const base = baseMaps[settings.baseMap]
   return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
@@ -140,6 +141,6 @@ export default function MapView({ features, onSelect, onReady, showLabels, setti
     <MapInitializer onReady={onReady} />
     {categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
     {provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
-    {plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
+    {plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
   </MapContainer>
 }

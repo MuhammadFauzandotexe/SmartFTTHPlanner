@@ -64,3 +64,9 @@ Roadmap Minimum-Cost Flow, CP-SAT, optimasi global dan routing akses ditunda; ch
 - `npm run build -- --webpack` dengan konfigurasi existing terhenti pada integrasi CLI TypeScript Next (`Could not parse output from TypeScript's --showConfig`). Pemanggilan helper Next tersebut secara terpisah juga gagal dengan stdout kosong, sedangkan `tsc --showConfig` langsung menghasilkan JSON valid.
 - Build produksi Webpack berhasil sampai halaman statis selesai dengan `experimental.useTypeScriptCli: false` **sementara** untuk memakai API TypeScript. `next.config.mjs` dipulihkan persis setelah pemeriksaan; tidak ada perubahan konfigurasi build permanen atau dependency baru.
 - Inventori computer/browser sesi mengembalikan daftar browser kosong, sehingga tidak ada pemeriksaan visual browser yang diklaim.
+
+## Memutuskan hubungan rumah–FAT secara manual
+
+Klik cluster untuk menampilkan label jarak, lalu klik **⋮ → Putuskan dari cluster** pada hubungan rumah yang dipilih. Menu dapat dibuka lewat keyboard dan ditutup dengan Escape. Tindakan ini menghapus keanggotaan dan koneksi layanan rumah tersebut, menghitung ulang total drop dan port terpakai, lalu menandai rumah belum terlayani dengan alasan pemutusan manual. Data survei dan kandidat FAT tidak dihapus, termasuk saat cluster tidak lagi memiliki anggota.
+
+Cluster yang diedit disimpan sebagai snapshot terkunci. Daftar rumah yang dilepas dan revision tindakan manual dipertahankan selama sesi agar hitung ulang/configuration reset tidak memasang hubungan otomatis lagi. Usulan terdampak menjadi stale. Alokasi eksplisit yang disetujui kemudian menghapus penahanan manual rumah tersebut. Sesi ini tidak menambahkan alur alokasi manual baru; tindakan pemutusan merupakan fokus perubahan ini.

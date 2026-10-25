@@ -30,10 +30,11 @@ export type FatCandidate = {
 export type HomeGroup = { capacity?: number; occupiedPorts?: number; locked?: boolean; id: string; color: string; homes: PlanningPoint[]; candidate: FatCandidate | null }
 export type PlanningIssue = { id: string; name: string; reason: string }
 export type FtthPlan = {
+  manualRevision?: number
   fatPorts: number
   maxDropLengthMeters: number
   distanceMethod: "straight-line"
-  unservedHomes: { home: PlanningPoint; reason: string; fatId?: string; pole?: PlanningPoint; distanceMeters?: number }[]
+  unservedHomes: { home: PlanningPoint; reason: string; fatId?: string; pole?: PlanningPoint; distanceMeters?: number; distanceMethod?: "route" | "straight-line" }[]
   groups: HomeGroup[]
   homeCount: number
   poleCount: number
