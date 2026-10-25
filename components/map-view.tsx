@@ -5,10 +5,11 @@ import { MapContainer, TileLayer, useMap } from "react-leaflet"
 import L from "leaflet"
 import { toGeoJSON, type Category, type FeatureItem } from "@/lib/survey"
 import { baseMaps, categories, layerPaneName, layerZIndex, type LayerSettings, type LayerStyle } from "@/lib/layer-settings"
+import { FatSelectionLayer } from "@/components/fat-selection-layer"
 import { PlanningMapLayers } from "@/components/planning-map-layers"
 import { RecommendationMapLayer } from "@/components/recommendation-map-layer"
 import type { Proposal } from "@/lib/allocation-recommendations"
-import type { FtthPlan } from "@/lib/ftth-planning"
+import type { FtthPlan, PlanningPoint } from "@/lib/ftth-planning"
 import "leaflet/dist/leaflet.css"
 
 type MapViewProps = {
@@ -19,6 +20,8 @@ type MapViewProps = {
   settings: LayerSettings
   provisional?: Proposal | null
   onSelectProposal?: (proposal: Proposal) => void
+  selectingHome?: PlanningPoint | null
+  onPickFat?: (groupId: string) => void
   plan?: FtthPlan | null
   highlightedGroupId?: string | null
   onDisconnectHome?: (groupId: string, homeId: string) => void
@@ -133,14 +136,15 @@ function CategoryLayer({ features, category, style, zIndex, onSelect, showLabels
   return null
 }
 
-export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
+export default function MapView({ features, onSelect, onReady, showLabels, settings, plan, selectingHome, onPickFat, provisional, onSelectProposal, highlightedGroupId, onSelectGroup, onSelectHome, onDisconnectHome, onHighlightGroup, onHoverGroup }: MapViewProps) {
   const grouped = useMemo(() => Object.fromEntries(categories.map(category => [category, features.filter(feature => feature.category === category)])) as Record<Category, FeatureItem[]>, [features])
   const base = baseMaps[settings.baseMap]
   return <MapContainer center={[-6.9147, 107.6098]} zoom={14} maxZoom={22} zoomControl={false} className="h-full w-full">
     <TileLayer key={settings.baseMap} attribution={base.attribution} url={base.url} maxNativeZoom={19} maxZoom={22} />
     <MapInitializer onReady={onReady} />
-    {categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
-    {provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
-    {plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
+    {!selectingHome && categories.map(category => <CategoryLayer key={category} category={category} features={grouped[category]} style={settings.layers[category]} zIndex={layerZIndex(settings.order, category)} onSelect={onSelect} showLabels={showLabels} />)}
+    {!selectingHome && provisional && <RecommendationMapLayer proposal={provisional} onSelect={onSelectProposal} />}
+    {selectingHome && plan && onPickFat && <FatSelectionLayer plan={plan} home={selectingHome} onPick={onPickFat} />}
+    {!selectingHome && plan && onSelectGroup && onSelectHome && onHighlightGroup && onHoverGroup && <PlanningMapLayers plan={plan} highlightedGroupId={highlightedGroupId || null} onSelectGroup={onSelectGroup} onSelectHome={onSelectHome} onDisconnectHome={onDisconnectHome} onHighlightGroup={onHighlightGroup} onHoverGroup={onHoverGroup} homeMarkerSize={settings.layers.Rumah.markerSize} />}
   </MapContainer>
 }

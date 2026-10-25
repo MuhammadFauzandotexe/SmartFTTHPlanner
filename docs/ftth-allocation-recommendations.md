@@ -70,3 +70,13 @@ Roadmap Minimum-Cost Flow, CP-SAT, optimasi global dan routing akses ditunda; ch
 Klik cluster untuk menampilkan label jarak, lalu klik **⋮ → Putuskan dari cluster** pada hubungan rumah yang dipilih. Menu dapat dibuka lewat keyboard dan ditutup dengan Escape. Tindakan ini menghapus keanggotaan dan koneksi layanan rumah tersebut, menghitung ulang total drop dan port terpakai, lalu menandai rumah belum terlayani dengan alasan pemutusan manual. Data survei dan kandidat FAT tidak dihapus, termasuk saat cluster tidak lagi memiliki anggota.
 
 Cluster yang diedit disimpan sebagai snapshot terkunci. Daftar rumah yang dilepas dan revision tindakan manual dipertahankan selama sesi agar hitung ulang/configuration reset tidak memasang hubungan otomatis lagi. Usulan terdampak menjadi stale. Alokasi eksplisit yang disetujui kemudian menghapus penahanan manual rumah tersebut. Sesi ini tidak menambahkan alur alokasi manual baru; tindakan pemutusan merupakan fokus perubahan ini.
+
+## Sambungkan rumah manual ke cluster FAT (simulasi)
+
+Pada detail rumah yang tercatat belum terlayani, pilih **Sambungkan ke FAT**. Peta mengisolasi rumah tujuan dan FAT rancangan yang masih memiliki port; layer survei lain, cluster, hubungan layanan, dan provisional disembunyikan sementara tanpa mengubah preferensi layer atau melakukan fit/zoom. FAT penuh tidak ditampilkan. FAT berbeda pada satu tiang dapat dipilih melalui popup berisi masing-masing ID dan sisa port. **Batal memilih FAT** mengembalikan tampilan normal.
+
+Klik FAT memvalidasi ulang rumah masih belum terlayani, kapasitas terbaru (termasuk port yang sudah terpakai di luar anggota cluster), dan batas drop. Di atas batas atau jalur yang diketahui terlarang ditolak; mode pemilihan tetap terbuka agar engineer dapat memilih tujuan lain. Tepat pada batas diperbolehkan. Input/configuration revision yang berubah membatalkan mode pemilihan agar hasil lama tidak diterapkan.
+
+Ini penugasan **simulasi manual**, mengikuti screening perencanaan existing: geodesik Turf dalam meter jika belum ada evidence jalur valid. Bukan persetujuan jalur fisik atau pengganti alur verifikasi usulan. Panjang jalur terverifikasi digunakan jika tersedia; tidak menyisipkan konfirmasi jalur palsu saat hanya jarak lurus diketahui. UI tetap menyebut keterbatasan jarak lurus.
+
+Setelah sukses, anggota/koneksi/total drop/port diperbarui bersama, rumah dihapus dari unserved dan penahanan pemutusan manualnya dibersihkan. Cluster disimpan sebagai desain manual terkunci selama sesi; hitung ulang tidak menimpa keputusan tersebut. Tidak membuat FAT baru, tidak menghapus survei, dan tidak memindahkan rumah yang masih memiliki layanan aktif secara langsung. Gunakan pemutusan dahulu untuk memindahkan rumah ke FAT lain.

@@ -266,6 +266,37 @@ export function disconnectHome(plan: FtthPlan, state: AllocationState, groupId: 
   const lock: LockedDesign = {group,proposalId:previous?.proposalId||`DISCONNECT:${groupId}`,geometryRevision:JSON.stringify([group.candidate?.pole.coordinates,group.homes.map(h=>[h.id,h.coordinates])]),verification:{paths,installation:previous?.verification.installation||false,upstream:previous?.verification.upstream||false,capacityConfirmed:previous?.verification.capacityConfirmed||false,maxFats:previous?.verification.maxFats,note:[previous?.verification.note,note].filter(Boolean).join("\n")}}
   return {plan:{...plan,manualRevision,groups:plan.groups.map(g=>g.id===groupId?group:g),unservedHomes:[...plan.unservedHomes.filter(item=>item.home.id!==homeId),{home,reason:"Diputuskan manual dari cluster oleh engineer.",fatId:original.candidate?.id,pole:original.candidate?.pole,distanceMeters:connection?.distanceMeters,distanceMethod:connection?.method || "straight-line"}]},state:{...state,manualRevision,detachedHomeIds:[...new Set([...(state.detachedHomeIds||[]),homeId])],locks:[...state.locks.filter(l=>l.group.id!==groupId),lock],proposals:state.proposals.map(p=>p.decision==="accepted"&&p.homes.some(h=>h.id===homeId)?{...p,history:[...p.history,note]}:p)}}
 }
+/** Engineer-selected allocation in the simulation; straight-line screening is not field verification. */
+export function connectHomeToFat(ctx: AllocationContext, state: AllocationState, groupId: string, homeId: string): {plan: FtthPlan; state: AllocationState} {
+  const plan = ctx.plan
+  const original = plan.groups.find(group=>group.id===groupId)
+  if (!original?.candidate) throw new Error("FAT tujuan tidak tersedia pada rancangan terbaru.")
+  const active = plan.groups.find(group=>group.homes.some(home=>home.id===homeId))
+  if (active?.id===groupId) return {plan,state}
+  if (active) throw new Error("Rumah sudah menjadi anggota cluster lain. Putuskan hubungan terlebih dahulu.")
+  const home = plan.unservedHomes.find(item=>item.home.id===homeId)?.home
+  if (!home) throw new Error("Rumah tidak tercatat sebagai belum terlayani pada hasil perencanaan terbaru.")
+  const capacity = original.capacity ?? plan.fatPorts
+  const occupied = original.occupiedPorts ?? 0
+  if (!Number.isInteger(capacity) || !Number.isInteger(occupied) || occupied<0 || original.homes.length+occupied>=capacity) throw new Error("FAT tujuan tidak memiliki port tersedia.")
+  const straight = planningDistance(home,original.candidate.pole)
+  const evidence = ctx.paths?.[pathKey(home.id,original.candidate.pole.id)]
+  if (evidence?.allowed==="no") throw new Error("Jalur rumah ke FAT ini diketahui tidak diizinkan.")
+  const route = evidence?.lengthMeters
+  if (route!==undefined && (!Number.isFinite(route) || route<0 || route<straight-0.01)) throw new Error("Data panjang jalur drop tidak valid; penugasan dibatalkan.")
+  const meters = route ?? straight
+  if (!Number.isFinite(meters) || straight>plan.maxDropLengthMeters || meters>plan.maxDropLengthMeters) throw new Error(`Jarak rumah–FAT ${meters.toLocaleString("id-ID",{maximumFractionDigits:1})} m melebihi batas drop ${plan.maxDropLengthMeters} m. Pilih FAT lain.`)
+  const method = route!==undefined && evidence?.allowed==="yes" ? "route" as const : "straight-line" as const
+  const checkedMeters = method==="route" ? meters : straight
+  const connections = [...original.candidate.connections,{homeId,distanceMeters:checkedMeters,method}]
+  const group: HomeGroup = {...original,capacity,locked:true,homes:[...original.homes,home],candidate:{...original.candidate,connections,totalDistanceMeters:connections.reduce((sum,c)=>sum+c.distanceMeters,0)}}
+  const previous = state.locks.find(lock=>lock.group.id===groupId)
+  const note = `Penugasan manual ${home.name} ke ${original.candidate.id}; ${method==="route"?"jalur terverifikasi":"estimasi jarak lurus, lintasan pemasangan belum diverifikasi"} ${checkedMeters.toFixed(1)} m.`
+  const verification: ManualVerification = {...previous?.verification,paths:{...previous?.verification.paths,...(method==="route"?{[homeId]:{allowed:"yes" as const,lengthMeters:checkedMeters}}:{})},installation:previous?.verification.installation||false,upstream:previous?.verification.upstream||false,capacityConfirmed:previous?.verification.capacityConfirmed||false,note:[previous?.verification.note,note].filter(Boolean).join("\n")}
+  const lock: LockedDesign = {group,proposalId:previous?.proposalId||`MANUAL:${groupId}`,verification,geometryRevision:JSON.stringify([group.candidate!.pole.coordinates,group.homes.map(h=>[h.id,h.coordinates])])}
+  const manualRevision = Math.max(plan.manualRevision||0,state.manualRevision||0)+1
+  return {plan:{...plan,manualRevision,groups:plan.groups.map(g=>g.id===groupId?group:g),unservedHomes:plan.unservedHomes.filter(h=>h.home.id!==homeId)},state:{...state,manualRevision,detachedHomeIds:state.detachedHomeIds?.filter(id=>id!==homeId),locks:[...state.locks.filter(l=>l.group.id!==groupId),lock]}}
+}
 export function lockedDesignIssues(ctx: AllocationContext, locks: LockedDesign[]): string[] {
   const messages:string[]=[]
   for(const {group,verification} of locks) {

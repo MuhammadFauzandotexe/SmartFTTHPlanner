@@ -246,3 +246,41 @@ test('disconnect an accepted home updates lock and later explicit reassignment c
   assert(!accepted.state.detachedHomeIds.includes(home.id))
   assert.equal(accepted.plan.groups.flatMap(g=>g.homes).filter(h=>h.id===home.id).length,1)
 })
+
+for(const ratio of [.5,1,2]) test(`direct manual simulation connection enforces drop boundary: ratio ${ratio}`,()=>{
+  const meters=planningDistance(home,pole), ctx=context({groups:[group()],max:meters/ratio}), state=a.emptyAllocations()
+  const original=JSON.stringify(ctx)
+  if(ratio>1){assert.throws(()=>a.connectHomeToFat(ctx,state,'g-f',home.id),/melebihi batas drop/);assert.equal(JSON.stringify(ctx),original);return}
+  const next=a.connectHomeToFat(ctx,state,'g-f',home.id)
+  assert.equal(next.plan.unservedHomes.length,0)
+  assert.equal(next.plan.groups[0].homes.length,2)
+  assert.equal(next.plan.groups[0].candidate.connections.at(-1).method,'straight-line')
+  assert.equal(next.plan.groups[0].candidate.connections.at(-1).distanceMeters,meters)
+  assert.equal(next.state.locks.length,1)
+  assert.equal(JSON.stringify(ctx),original)
+  assert.deepEqual(a.connectHomeToFat({...ctx,plan:next.plan},next.state,'g-f',home.id),next)
+})
+test('manual picker acceptance rechecks available capacity including occupied external ports',()=>{
+  const g=group('f',[p('s')],2);g.occupiedPorts=1
+  const ctx=context({groups:[g]})
+  assert.throws(()=>a.connectHomeToFat(ctx,a.emptyAllocations(),g.id,home.id),/port tersedia/)
+  assert.throws(()=>a.connectHomeToFat(ctx,a.emptyAllocations(),'gone',home.id),/tidak tersedia/)
+})
+test('manual picker refuses served homes and known forbidden or overly long routes',()=>{
+  let ctx=context({groups:[group()]})
+  const forbidden=route(ctx,home,pole,'no')
+  assert.throws(()=>a.connectHomeToFat(forbidden,a.emptyAllocations(),'g-f',home.id),/tidak diizinkan/)
+  ctx=route(context({groups:[group()]}),home,pole,'yes',51)
+  assert.throws(()=>a.connectHomeToFat(ctx,a.emptyAllocations(),'g-f',home.id),/melebihi batas drop/)
+  ctx=context({homes:[],groups:[group('first',[home]),group('other')]})
+  assert.throws(()=>a.connectHomeToFat(ctx,a.emptyAllocations(),'g-other',home.id),/cluster lain/)
+})
+test('manual assignment uses allowed route length when present and persists through recalculation',()=>{
+  const ctx=route(context({groups:[group()]})),next=a.connectHomeToFat(ctx,{...a.emptyAllocations(),detachedHomeIds:[home.id]},'g-f',home.id)
+  const connection=next.plan.groups[0].candidate.connections.find(c=>c.homeId===home.id)
+  assert.equal(connection.method,'route');assert.equal(connection.distanceMeters,20)
+  assert.deepEqual(next.state.detachedHomeIds,[])
+  const recomputed=a.preserveLockedDesigns(ctx.plan,next.state.locks,next.state.detachedHomeIds,next.state.manualRevision)
+  assert.equal(recomputed.groups.flatMap(g=>g.homes).filter(h=>h.id===home.id).length,1)
+  assert(!recomputed.unservedHomes.some(item=>item.home.id===home.id))
+})

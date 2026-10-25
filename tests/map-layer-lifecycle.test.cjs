@@ -79,6 +79,7 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     const map = { layers: new Set(), panes: {}, getPane(name) { return this.panes[name] }, createPane(name) { return this.panes[name] = { style: {} } } }
     const harness = hooks()
     const { default: MapView } = load('../components/map-view.tsx', { react: harness.react, 'react-leaflet': { MapContainer: 'MapContainer', TileLayer: 'TileLayer', useMap: () => map }, leaflet, '@/components/recommendation-map-layer': { RecommendationMapLayer: 'RecommendationMapLayer' },
+      '@/components/fat-selection-layer': { FatSelectionLayer: 'FatSelectionLayer' },
       '@/components/planning-map-layers': { PlanningMapLayers: () => null }, '@/lib/survey': survey, '@/lib/layer-settings': preferences, 'leaflet/dist/leaflet.css': {} })
     const item = { id: 'house', name: '001', category: 'Rumah', geometry: { type: 'Point', coordinates: [107, -6] }, props: {} }
     const line = { ...item, id: 'line', geometry: { type: 'LineString', coordinates: [[107, -6], [108, -6]] } }
@@ -88,6 +89,12 @@ test('renderer updates existing groups, styles and panes; visibility never dupli
     const clickedObjects = []
     const select = item => clickedObjects.push(item)
     const tree = MapView({ features: items, settings, onSelect: select })
+    const isolated = MapView({ features: items, settings, onSelect: select, selectingHome: {id:'target',coordinates:[107,-6]}, plan: {groups:[]}, onPickFat() {}, provisional:{} })
+    assert.equal(isolated.props.children[2], false) // Survey homes, FATs and other categories hidden.
+    assert.equal(isolated.props.children[3], false) // Recommendation overlays hidden.
+    assert.equal(isolated.props.children[4].type, 'FatSelectionLayer')
+    assert.equal(isolated.props.children[5], false) // Cluster/service layers hidden.
+
     const categoryElement = tree.props.children[2].find(element => element.props.category === 'Rumah')
     let props = categoryElement.props
     harness.render(() => categoryElement.type(props))
@@ -452,6 +459,37 @@ test('FAT configuration is applied only after manual planning and dropdown navig
   tree = harness.render(Viewer)
   assert.equal(panel(tree).props.plan.maxDropLengthMeters, 10)
   assert(panel(tree).props.plan.unservedHomes.length > 0)
+  const mapView = tree => find(tree, node=>node.type==='MapView')
+  const connectButton = tree => find(tree,node=>node.type==='button'&&node.props.children==='Sambungkan ke FAT')
+  const cancelButton = tree => find(tree,node=>node.type==='button'&&node.props.children==='Batal memilih FAT')
+  mapView(tree).props.onSelect(data[50]);tree=harness.render(Viewer)
+  assert(connectButton(tree))
+  connectButton(tree).props.onClick();tree=harness.render(Viewer)
+  assert.equal(mapView(tree).props.selectingHome.id,'h50')
+  const beforeRejected=panel(tree).props.plan
+  mapView(tree).props.onPickFat('G002');tree=harness.render(Viewer)
+  assert.equal(panel(tree).props.plan,beforeRejected)
+  assert.equal(mapView(tree).props.selectingHome.id,'h50')
+  assert(find(tree,node=>node.props?.role==='alert'&&String(node.props.children).includes('melebihi batas drop')))
+  cancelButton(tree).props.onClick();tree=harness.render(Viewer)
+  assert.equal(mapView(tree).props.selectingHome,null)
+  mapView(tree).props.onSelect(data[1]);tree=harness.render(Viewer)
+  assert.equal(connectButton(tree),null) // Served homes cannot enter the picker.
+  mapView(tree).props.onDisconnectHome('G001','h0');tree=harness.render(Viewer)
+  mapView(tree).props.onSelect(data[0]);tree=harness.render(Viewer)
+  connectButton(tree).props.onClick();tree=harness.render(Viewer)
+  assert.equal(mapView(tree).props.selectingHome.id,'h0')
+  const previousPorts=panel(tree).props.plan.groups.find(g=>g.id==='G002').homes.length
+  cameraChanges.length=0
+  mapView(tree).props.onPickFat('G002');tree=harness.render(Viewer)
+  assert.equal(mapView(tree).props.selectingHome,null)
+  const updated=panel(tree).props.plan
+  assert.equal(updated.groups.find(g=>g.id==='G002').homes.length,previousPorts+1)
+  assert.equal(updated.groups.flatMap(g=>g.homes).filter(h=>h.id==='h0').length,1)
+  assert(!updated.unservedHomes.some(item=>item.home.id==='h0'))
+  assert.deepEqual(cameraChanges,[])
+  panel(tree).props.onRun();tree=harness.render(Viewer)
+  assert(panel(tree).props.plan.groups.find(g=>g.id==='G002').homes.some(h=>h.id==='h0'))
 })
 
 test('collapsible control sections report user toggles without duplicate state updates', () => {
@@ -513,4 +551,38 @@ test('recommendation UI journey: unserved → generate → map focus → explici
   assert.equal(context.plan.unservedHomes.length,0);assert.equal(context.plan.groups.length,1)
   assert.equal(state.locks.length,1);assert.equal(state.proposals[0].decision,'accepted')
   assert.equal(a.proposalStatus(context,state.proposals[0]),'passed')
+})
+
+test('FAT picker draws only spare FAT devices and target home; shared pole choices retain group IDs',()=>{
+  const previousDocument=global.document
+  global.document={createElement:()=>({children:[],events:{},style:{},appendChild(child){this.children.push(child)},addEventListener(name,callback){this.events[name]=callback}})}
+  try {
+    class Layer {
+      constructor(options={}){this.options=options;this.events={}}
+      on(name,fn){this.events[name]=fn;return this}
+      bindTooltip(content,options){this.tooltip=content;this.tooltipOptions=options;return this}
+      bindPopup(content,options){this.popup=content;this.popupOptions=options;return this}
+      addTo(map){this.map=map;map.layers.add(this);return this}
+      remove(){this.map?.layers.delete(this);return this}
+    }
+    class Group extends Layer {constructor(){super();this.children=[]}addLayer(child){this.children.push(child);return this}clearLayers(){this.children=[]}}
+    const markers=[]
+    const leaflet={featureGroup:()=>new Group(),circleMarker:(_,options)=>new Layer(options),marker:(_,options)=>{const marker=new Layer(options);markers.push(marker);return marker},divIcon:options=>options}
+    const map={layers:new Set(),panes:{},getPane(id){return this.panes[id]},createPane(id){return this.panes[id]={style:{}}},closePopup(){},fitBounds(){assert.fail('picker must not change camera')}}
+    const harness=hooks(), picked=[]
+    const {FatSelectionLayer}=load('../components/fat-selection-layer.tsx',{react:harness.react,'react-leaflet':{useMap:()=>map},leaflet,'@/lib/ftth-planning':require('../lib/ftth-planning.ts')})
+    const home={id:'h',name:'Rumah tujuan',coordinates:[.0001,0]},pole={id:'p',name:'Tiang',coordinates:[0,0]}
+    const groups=[{id:'full',homes:[{id:'served'}],capacity:1,candidate:{id:'F-full',pole}},{id:'empty',homes:[],capacity:2,candidate:{id:'F-empty',pole}},{id:'spare',homes:[],capacity:2,occupiedPorts:1,candidate:{id:'F-spare',pole}},{id:'external-full',homes:[],capacity:2,occupiedPorts:2,candidate:{id:'F-external-full',pole}}]
+    harness.render(()=>FatSelectionLayer({plan:{groups,fatPorts:8},home,onPick:id=>picked.push(id)}))
+    const group=[...map.layers][0]
+    assert.equal(group.children.length,2) // target home and one shared pole marker only.
+    assert.equal(markers.length,1)
+    assert.equal(markers[0].popupOptions.autoPan,false)
+    assert.equal(markers[0].popup.children.length,3) // heading and two available FATs.
+    assert(markers[0].popup.children[1].textContent.includes('2 port tersedia'))
+    assert(markers[0].popup.children[2].textContent.includes('1 port tersedia'))
+    markers[0].popup.children[2].events.click()
+    assert.deepEqual(picked,['spare'])
+    harness.cleanup();assert.equal(map.layers.size,0)
+  } finally {global.document=previousDocument}
 })
