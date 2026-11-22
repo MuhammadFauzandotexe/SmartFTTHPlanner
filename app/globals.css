@@ -30,6 +30,7 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -53,8 +54,9 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: #047857;
+  --primary-hover: #065f46;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -170,6 +172,8 @@
 }
 .drop-distance-label span {
   display: inline-block;
+  box-sizing: border-box;
+  height: 20px;
   padding: 1px 5px;
   border: 1px solid #a7f3d0;
   border-radius: 4px;
@@ -209,6 +213,24 @@
   color: white;
   font: bold 11px/1 sans-serif;
 }
+.survey-fdt-symbol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  background: #6d28d9;
+  border: 3px solid white;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px #3b0764, 0 3px 8px rgb(0 0 0 / 55%);
+  color: white;
+  font: 800 11px/1 sans-serif;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 65%);
+}
+
+.survey-fdt-highlighted {
+  border-color: #fef08a;
+  box-shadow: 0 0 0 3px #854d0e, 0 0 0 6px rgb(254 240 138 / 80%), 0 4px 10px rgb(0 0 0 / 55%);
+}
 
 @layer base {
   * {
@@ -217,4 +239,10 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.survey-point-focused {
+  border-radius: 50%;
+  outline: 3px solid #0284c7;
+  box-shadow: 0 0 0 6px rgb(255 255 255 / 90%);
 }

@@ -1,16 +1,29 @@
 "use client"
 
-import { Cable, Sparkles } from "lucide-react"
+import type { ReactNode } from "react"
+import { Cable, LoaderCircle, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export default function SimulationActions({ disabled, dropDisabled, simulating, maxDropLengthMeters, stale, onSimulateFat, onSimulateDrop }: {
-  disabled: boolean; dropDisabled: boolean; simulating: boolean; maxDropLengthMeters: number; stale: boolean
-  onSimulateFat: () => void; onSimulateDrop: () => void
+export default function SimulationActions({ disabled, dropDisabled, simulating, dropLoading, maxDropLengthMeters, stale, reason, onSimulateFat, onSimulateDrop, children }: {
+  disabled: boolean; dropDisabled: boolean; simulating: boolean; dropLoading: boolean; maxDropLengthMeters: number; stale: boolean; reason?: string
+  onSimulateFat: () => void; onSimulateDrop: () => void; children: ReactNode
 }) {
-  return <section className="shrink-0 space-y-2 border-b bg-white p-3" aria-label="Aksi simulasi">
-    <div className="mb-2 flex items-center justify-between text-[10px]"><span className="font-semibold uppercase tracking-wide text-slate-400">Simulasi</span><span className="text-slate-500">Batas drop {maxDropLengthMeters} m</span></div>
-    <Button className="w-full" size="sm" disabled={disabled} onClick={onSimulateFat}><Sparkles data-icon="inline-start" />{simulating ? "Menghitung simulasi..." : "Simulasikan FAT"}</Button>
-    <Button className="w-full" size="sm" variant="outline" disabled={dropDisabled} onClick={onSimulateDrop}><Cable data-icon="inline-start" />Simulasikan Kabel Drop</Button>
-    {stale && <p role="status" className="rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-800">Batas berubah. Hasil sebelumnya perlu dihitung ulang.</p>}
+  return <section className="shrink-0 border-b bg-white px-4 py-2" aria-label="Aksi Perencanaan" aria-busy={simulating || dropLoading}>
+    <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+      <h2 className="text-xs font-semibold text-slate-700">Aksi Perencanaan</h2>
+      <div role="group" aria-label="Layanan FAT" className="flex min-w-0 flex-wrap items-center justify-center gap-2">
+        <span className="text-[11px] font-medium text-slate-600">1 · Layanan FAT</span>
+        <Button className="h-9" disabled={disabled} aria-describedby={reason ? "planning-reason" : undefined} onClick={onSimulateFat}>{simulating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}{simulating ? "Menghitung FAT…" : "Simulasikan FAT"}</Button>
+        <Button className="h-9" variant="outline" disabled={dropDisabled} aria-describedby={reason ? "planning-reason" : undefined} onClick={onSimulateDrop}>{dropLoading ? <LoaderCircle className="animate-spin" /> : <Cable />}{dropLoading ? "Menghitung Drop…" : "Simulasikan Kabel Drop"}</Button>
+      </div>
+      <div role="group" aria-label="Sumber Distribusi" className="flex min-w-0 flex-wrap items-center justify-center gap-2 border-l border-slate-200 pl-4">
+        <span className="text-[11px] font-medium text-slate-600">2 · Sumber Distribusi</span>{children}
+      </div>
+    </div>
+    <div className="mt-1 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
+      <span>Batas drop {maxDropLengthMeters} m</span>
+      {reason && <p id="planning-reason" role="status">{reason}</p>}
+      {stale && <p role="status" className="font-medium text-amber-800">Hasil perlu dihitung ulang untuk batas aktif.</p>}
+    </div>
   </section>
 }

@@ -12,6 +12,7 @@ export type FeatureItem = {
   kind: SurveyGeometry["type"]
   coords: [number, number]
   geometry: SurveyGeometry
+  mountingPoleId?: string
   description?: string
   /** Explicit survey declaration; never inferred from a line's name or proximity. */
   dropSupport?: boolean

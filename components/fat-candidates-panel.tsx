@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import ReviewLengthSummary from "@/components/review-length-summary"
 import { formatDropMeters } from "@/lib/drop-plan"
 import { dropDistanceLabel, reviewStatusLabel, type SimulationReview } from "@/lib/simulation-review"
+import type { FeatureItem } from "@/lib/import-survey"
 import { FAT_SPLITTER_PORTS } from "@/lib/fat-candidates"
 import { DROP_LAST_SPAN_METERS } from "@/lib/planning-config"
 import { Button } from "@/components/ui/button"
@@ -22,9 +23,11 @@ type Props = {
   selectedBox: SelectedFat | null
   showOtherCandidates: boolean
   onSelect: (candidate: FatCandidate) => void
+  onSelectHouse: (house: FeatureItem) => void
+  approvedFatIds?: string[]
 }
 
-export default function FatCandidatesPanel({ review, onReviewAll, maxDropLengthMeters, stale, outOfRangeCount, candidates, selected, simulation, selectedBox, showOtherCandidates, onSelect }: Props) {
+export default function FatCandidatesPanel({ review, onReviewAll, maxDropLengthMeters, stale, outOfRangeCount, candidates, selected, simulation, selectedBox, showOtherCandidates, onSelect, onSelectHouse, approvedFatIds = [] }: Props) {
   const detailRef = useRef<HTMLElement>(null)
   useEffect(() => {
     if (selected) detailRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
@@ -59,7 +62,7 @@ export default function FatCandidatesPanel({ review, onReviewAll, maxDropLengthM
       <ol className="max-h-64 space-y-2 overflow-auto" aria-label="FAT terpilih sementara">
         {simulation.boxes.map((box, index) => <li key={box.candidate.id}>
           <button type="button" aria-pressed={selected?.id === box.candidate.id} onClick={() => onSelect(box.candidate)} className={`w-full rounded-md border p-2 text-left ${selected?.id === box.candidate.id ? "border-emerald-600 bg-emerald-50" : "hover:bg-slate-50"}`}>
-            <span className="block font-semibold">FAT {index + 1} · {box.candidate.pole.name}</span>
+            <span className="block font-semibold">FAT {index + 1} · {box.candidate.pole.name} · {approvedFatIds.includes(box.candidate.id) ? "Perangkat disetujui" : "Provisional"}</span>
             <span className="block">{box.houses.length}/16 rumah · {box.splitters.length} splitter</span>
             <span className="text-slate-500">Drop (rute + estimasi): {formatDropMeters(boxMetrics.get(box.candidate.id)?.review.total ?? 0)}</span>
           </button>
@@ -79,7 +82,7 @@ export default function FatCandidatesPanel({ review, onReviewAll, maxDropLengthM
             {splitter.houses.map(({ house }) => {
               const drop = review?.drops.find(d => d.fatId === selectedBox.candidate.id && d.splitterId === splitter.id && d.house.id === house.id)
               return <li key={house.id} className="space-y-1">
-                <div className="flex justify-between gap-2"><span className="min-w-0 break-words">{house.name}</span><span className="shrink-0 font-mono">{drop ? dropDistanceLabel(drop) ?? "—" : "—"}</span></div>
+                <div className="flex justify-between gap-2"><button className="min-w-0 break-words text-left underline" onClick={() => onSelectHouse(house)}>{house.name}</button><span className="shrink-0 font-mono">{drop ? dropDistanceLabel(drop) ?? "—" : "—"}</span></div>
                 <p className={`text-[10px] ${drop?.status === "violation" ? "text-red-700" : "text-slate-500"}`}>{drop ? reviewStatusLabel(drop.status) : "Belum validasi rute"}</p>
               </li>
             })}
@@ -88,7 +91,7 @@ export default function FatCandidatesPanel({ review, onReviewAll, maxDropLengthM
       </section>}
       <details><summary className="cursor-pointer font-semibold">Rumah belum terlayani ({simulation.unservedHouses.length})</summary>
         <ul className="mt-2 max-h-48 space-y-2 overflow-auto">
-          {simulation.unservedHouses.map(house => <li key={house.id}><b>{house.name}</b> · {reachable.has(house.id) ? "Belum tertampung dalam usulan ini" : (stale ? "Tidak terjangkau pada pencarian sebelumnya" : `Tidak ada kandidat dalam ${maxDropLengthMeters} m`)}</li>)}
+          {simulation.unservedHouses.map(house => <li key={house.id}><button className="text-left font-semibold underline" onClick={() => onSelectHouse(house)}>{house.name}</button> · {reachable.has(house.id) ? "Belum tertampung dalam usulan ini" : (stale ? "Tidak terjangkau pada pencarian sebelumnya" : `Tidak ada kandidat dalam ${maxDropLengthMeters} m`)}</li>)}
         </ul>
       </details>
 

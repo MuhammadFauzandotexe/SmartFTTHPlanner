@@ -39,12 +39,14 @@ terverifikasi, termasuk pada bentangan terakhir.
   putus-putus tanpa rute: bermasalah.
 - Label menunjukkan total panjang, dihitung di titik tengah sepanjang geometri, bukan
   rata-rata koordinat ujung. Label estimasi diawali `Est.` dan tidak menerima input pointer.
-- Zoom <18 membatasi label ke FAT/rumah/rute terpilih; zoom >=18 menampilkan label yang
-  titik tengahnya berada di viewport. Label berdekatan diberi selisih vertikal kecil.
+- Default hanya kabel terpilih memiliki label permanen; panjang kabel lain tersedia melalui
+  hover/klik. Mode semua label menyaring tabrakan pada viewport, memprioritaskan kabel
+  terpilih, dan menyembunyikan label bertumpuk tanpa menggeser titik tengah jalur.
 - Layer dan label memiliki toggle terpisah. Detail dan daftar rute memakai panel existing.
-- Menjalankan ulang mengganti hasil. Hasil hanya berlaku untuk referensi survei dan
-  simulasi FAT asal; impor atau simulasi FAT baru membatalkannya. Jalankan simulasi drop
-  kembali setelah perubahan sumber. Hasil tidak disimpan sebagai fitur survei.
+- Menjalankan ulang mengganti hasil. Editing manual hanya mengganti rute rumah terkait,
+  tanpa mengubah survei. Generate FAT menghormati penguncian manual; generate drop
+  menghitung ulang rute dari penugasan saat ini. Proyek disimpan terpisah dari fitur survei
+  dalam snapshot browser; lihat [editing manual](manual-assignments.md).
 
 ## Konfigurasi batas total drop
 
@@ -52,7 +54,8 @@ Input **Maksimal Panjang Drop** pada pengaturan menerima angka positif (meter).
 Nilai default perencanaan baru adalah 60 m; bentangan terakhir tetap 35 m sebagai aturan
 terpisah. Nilai eksplisit disimpan di localStorage `smart-ftth:planning-config` dan dipakai
 kembali setelah refresh, termasuk jika pengguna menyimpan nilai 120 m. Tidak ada penyimpanan
-konfigurasi permanen pada versi sebelumnya; data survei dan simulasi tetap hanya selama sesi.
+konfigurasi permanen pada versi sebelumnya; versi ini juga menyimpan data survei dan
+simulasi dalam snapshot proyek `smart-ftth:project:v1`.
 Jika penyimpanan browser gagal, aplikasi memberitahu bahwa nilai hanya berlaku selama sesi.
 
 Perubahan batas memvalidasi ulang penugasan dan geometri rute yang ada, menandai hasil yang

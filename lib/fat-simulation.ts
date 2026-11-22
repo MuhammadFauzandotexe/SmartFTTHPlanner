@@ -26,8 +26,9 @@ const compareId = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0
 export function simulateFatPlacement(
   candidates: readonly FatCandidate[],
   surveyHouses: readonly FeatureItem[],
-  { maxEvaluations = 2000, config = DEFAULT_PLANNING_CONFIG }: { maxEvaluations?: number; config?: PlanningConfig } = {},
+  { maxEvaluations = 2000, config = DEFAULT_PLANNING_CONFIG, capacityByFat }: { maxEvaluations?: number; config?: PlanningConfig; capacityByFat?: ReadonlyMap<string, number> } = {},
 ): FatSimulation {
+  const capacity = (id: string) => Math.max(0, Math.min(FAT_CAPACITY, capacityByFat?.get(id) ?? FAT_CAPACITY))
   const maxDropLengthMeters = maxDropLength(config)
   const houses = new Map(surveyHouses.filter(h => h.category === "Rumah" && h.geometry.type === "Point").map(h => [h.id, h]))
   const poles = new Map([...candidates].sort((a, b) => compareId(a.id, b.id)).map(c => {
@@ -72,7 +73,7 @@ export function simulateFatPlacement(
     const choices = [...poles.values()].filter(c => !used.has(c.id)).map(candidate => {
       const available = [...edges.get(candidate.id)!.values()].filter(h => !current.has(h.house.id))
         .sort((a, b) => scarcity(a.house.id) - scarcity(b.house.id) || a.distanceMeters - b.distanceMeters || compareId(a.house.id, b.house.id))
-        .slice(0, FAT_CAPACITY)
+        .slice(0, capacity(candidate.id))
       return { candidate, available, scarcity: available.reduce((sum, h) => sum + scarcity(h.house.id), 0),
         drop: available.reduce((sum, h) => sum + h.distanceMeters, 0) }
     }).filter(c => c.available.length).sort((a, b) => b.available.length - a.available.length || a.scarcity - b.scarcity || a.drop - b.drop || compareId(a.candidate.id, b.candidate.id))
@@ -103,7 +104,7 @@ export function simulateFatPlacement(
           assignment.set(house, pole)
           residents.add(house)
         }
-        if (residents.size < FAT_CAPACITY) { move(); return true }
+        if (residents.size < capacity(pole)) { move(); return true }
         for (const resident of [...residents].sort((a, b) => scarcity(b) - scarcity(a) || compareId(a, b))) {
           if (place(resident, seen)) { move(); return true }
         }
@@ -150,7 +151,7 @@ export function simulateFatPlacement(
       for (const target of alternatives.get(house) ?? []) {
         if (exhausted) break
         if (target === source || !active.has(target)) continue
-        if (groups.get(target)!.length < FAT_CAPACITY) consider(() => new Map(current).set(house, target))
+        if (groups.get(target)!.length < capacity(target)) consider(() => new Map(current).set(house, target))
         // Swaps improve distance even when both boxes are full.
         for (const other of groups.get(target)!) {
           if (exhausted) break

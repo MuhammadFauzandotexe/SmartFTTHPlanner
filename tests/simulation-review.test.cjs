@@ -119,16 +119,16 @@ test('nearby FAT on distinct poles are not automatically capacity violations', (
   assert.deepEqual(review.boxes.map(b => b.remainingCapacity), [15,15])
 })
 
-test('label visibility follows selected FAT even close up, respects label toggle, and avoids all labels far away', () => {
+test('default labels only show the selected route; all-label mode respects FAT filter', () => {
   const h = point('h','Rumah',at(42.5)), a = box('a',[h])
   const drop = buildSimulationReview(simulation([a]),plan([route(a,h)])).drops[0]
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14 }),false)
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14, selectedFatId:'a' }),true)
+  assert.equal(shouldShowDropLabel(drop,{ showLabels:false, zoom:19 }),false)
+  assert.equal(shouldShowDropLabel(drop,{ showLabels:false, zoom:19, selectedFatId:'a', selectedHouseId:h.id }),false)
+  assert.equal(shouldShowDropLabel(drop,{ showLabels:false, zoom:14, selectedRouteId:drop.id }),true)
+  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14 }),true)
   assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:19, selectedFatId:'other' }),false)
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:19 }),true)
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:false, zoom:19, selectedFatId:'a' }),false)
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14, selectedHouseId:h.id }),true)
-  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14, selectedRouteId:drop.id }),true)
+  assert.equal(shouldShowDropLabel(drop,{ showLabels:true, zoom:14, selectedFatId:'other', selectedRouteId:drop.id }),true)
+  assert.equal(shouldShowDropLabel({ ...drop, midpoint:null },{ showLabels:true, zoom:19, selectedRouteId:drop.id }),false)
 })
 
 test('selected group is emphasized, others dimmed but retained, and verified/estimate/violation patterns differ', () => {

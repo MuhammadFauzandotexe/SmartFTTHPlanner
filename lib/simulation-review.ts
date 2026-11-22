@@ -53,9 +53,9 @@ export function dropDistanceLabel(drop: ReviewedDrop): string | null {
 export function shouldShowDropLabel(drop: ReviewedDrop, { showLabels, zoom, selectedFatId, selectedHouseId, selectedRouteId }: {
   showLabels: boolean; zoom: number; selectedFatId?: string; selectedHouseId?: string; selectedRouteId?: string
 }): boolean {
-  if (!showLabels || !drop.midpoint) return false
-  if (selectedFatId) return drop.fatId === selectedFatId
-  return zoom >= 18 || drop.house.id === selectedHouseId || drop.id === selectedRouteId
+  if (!drop.midpoint || !drop.coordinates || drop.lengthMeters === null) return false
+  if (drop.id === selectedRouteId) return true
+  return showLabels && (!selectedFatId || drop.fatId === selectedFatId)
 }
 export function dropAppearance(drop: ReviewedDrop, selectedFatId?: string, selectedRouteId?: string) {
   const dimmed = !!selectedFatId && selectedFatId !== drop.fatId
